@@ -7,6 +7,8 @@ The following detailed instructions outline the implementation of a Risk-Based G
 
 # Risk-Based Guardrails Withdrawal Strategy Implementation Guide
 
+**Source Material:** https://www.kitces.com/blog/risk-based-monte-carlo-probability-of-success-guardrails-retirement-distribution-hatchet/
+
 **Intended Audience:** Financial Advisors (Fiduciary Standard Recommended).
 
 **Core Principle:** This strategy recognizes that clients inevitably adjust their spending in retirement and provides a systematic, planned approach based on historical analysis and risk appetite, rather than relying on fixed withdrawal rates. The guardrails are defined around overall plan risk levels, not crude distribution rates, thus accounting for factors like Social Security, pensions, and non-portfolio cash flows.
