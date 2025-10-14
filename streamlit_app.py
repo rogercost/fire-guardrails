@@ -7,8 +7,10 @@ import utils
 
 st.set_page_config(layout="wide", page_title="Guardrail Withdrawal Simulator")
 
-st.title("Guardrail-Based Withdrawal Strategy Simulator")
-st.markdown("This application simulates a guardrail-based retirement withdrawal strategy based on historical market data.")
+title_ph = st.empty()
+desc_ph = st.empty()
+title_ph.title("Guardrail-Based Withdrawal Strategy Simulator")
+desc_ph.markdown("This application simulates a guardrail-based retirement withdrawal strategy based on historical market data.")
 
 # Sidebar for inputs
 st.sidebar.header("Simulation Parameters")
@@ -75,31 +77,54 @@ if st.sidebar.button(
     "Run Simulation",
     help="Fetch data and run the guardrail withdrawal simulation with the selected parameters."
 ):
-    st.subheader("Running Simulation...")
-    
-    # Load data
-    with st.spinner("Loading Shiller data..."):
-        shiller_df = utils.load_shiller_data()
-    st.success("Shiller data loaded.")
+    # Hide header/title block and use a single status line to save vertical space
+    title_ph.empty()
+    desc_ph.empty()
 
-    # Run simulation
-    with st.spinner("Calculating guardrail withdrawals..."):
-        results_df = utils.get_guardrail_withdrawals(
-            df=shiller_df,
-            start_date=start_date,
-            end_date=end_date,
-            analysis_start_date=analysis_start_date,
-            initial_value=initial_value,
-            stock_pct=stock_pct,
-            target_success_rate=target_success_rate,
-            upper_guardrail_success=upper_guardrail_success,
-            lower_guardrail_success=lower_guardrail_success,
-            upper_adjustment_fraction=upper_adjustment_fraction,
-            lower_adjustment_fraction=lower_adjustment_fraction,
-            adjustment_threshold=adjustment_threshold,
-            verbose=True
-        )
-    st.success("Simulation complete!")
+    status_ph = st.empty()
+    status_ph.text("Loading Shiller data...")
+    shiller_df = utils.load_shiller_data()
+    status_ph.text("Shiller data loaded.")
+
+    # Progress bar shown in the same status line area (0% -> 100%)
+    progress = status_ph.progress(0, text="Calculating guardrail withdrawals... 0%")
+    state = {"pct": 0, "status": None}
+
+    def render_progress():
+        label = f"Calculating guardrail withdrawals... {state['pct']}%"
+        if state["status"]:
+            label = f"{label} — {state['status']}"
+        progress.progress(state["pct"], text=label)
+
+    def on_progress(current, total):
+        pct = int(current * 100 / total) if total else 0
+        state["pct"] = pct
+        render_progress()
+
+    def on_status(msg):
+        state["status"] = msg
+        render_progress()
+
+    results_df = utils.get_guardrail_withdrawals(
+        df=shiller_df,
+        start_date=start_date,
+        end_date=end_date,
+        analysis_start_date=analysis_start_date,
+        initial_value=initial_value,
+        stock_pct=stock_pct,
+        target_success_rate=target_success_rate,
+        upper_guardrail_success=upper_guardrail_success,
+        lower_guardrail_success=lower_guardrail_success,
+        upper_adjustment_fraction=upper_adjustment_fraction,
+        lower_adjustment_fraction=lower_adjustment_fraction,
+        adjustment_threshold=adjustment_threshold,
+        verbose=True,
+        on_progress=on_progress,
+        on_status=on_status
+    )
+
+    # Remove status line entirely to place plots at the very top
+    status_ph.empty()
 
     # Charts (table removed)
     st.subheader("Portfolio Value vs Guardrails")

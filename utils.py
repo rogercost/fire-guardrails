@@ -284,7 +284,9 @@ def get_guardrail_withdrawals(df, start_date, end_date,
                               upper_adjustment_fraction=1.0,
                               lower_adjustment_fraction=0.1,
                               adjustment_threshold=0.05,
-                              verbose=False):
+                              verbose=False,
+                              on_progress=None,
+                              on_status=None):
     """
     Creates a dataframe of withdrawals that follow an adaptive guardrail strategy.
 
@@ -302,6 +304,8 @@ def get_guardrail_withdrawals(df, start_date, end_date,
     # Filter to analysis period
     mask = (df["Date"] >= pd.to_datetime(start_date)) & (df["Date"] <= pd.to_datetime(end_date))
     subset = df[mask].copy().reset_index(drop=True)
+    
+    total_months = len(subset)
 
     # Pre-compute portfolio returns for the entire historical period (for speed)
     all_stock_prices = df['Real Total Return Price'].values
@@ -341,6 +345,12 @@ def get_guardrail_withdrawals(df, start_date, end_date,
     for i, row in subset.iterrows():
         current_date = row['Date']
         months_remaining = len(subset) - i
+
+        status_line = f"Processing {current_date.strftime('%Y-%m')}, portfolio=${current_portfolio_value:,.0f}, months_remaining={months_remaining}"
+        if on_status is not None:
+            on_status(status_line)
+        if on_progress is not None:
+            on_progress(i + 1, total_months)
 
         def get_withdrawal_rate(success_rate):
             return get_wr_for_fixed_success_rate(df=df,
