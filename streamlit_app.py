@@ -1,6 +1,8 @@
-import streamlit as st
-import pandas as pd
 import datetime
+
+import streamlit as st
+import plotly.graph_objects as go
+
 import utils
 
 st.set_page_config(layout="wide", page_title="Guardrail Withdrawal Simulator")
@@ -12,23 +14,67 @@ st.markdown("This application simulates a guardrail-based retirement withdrawal 
 st.sidebar.header("Simulation Parameters")
 
 # Date Inputs
-start_date = st.sidebar.date_input("Retirement Start Date", value=datetime.date(1968, 4, 1))
-end_date = st.sidebar.date_input("Retirement End Date", value=datetime.date(2018, 3, 31))
-analysis_start_date = st.sidebar.date_input("Historical Analysis Start Date", value=datetime.date(1871, 1, 1))
+start_date = st.sidebar.date_input(
+    "Retirement Start Date",
+    value=datetime.date(1968, 4, 1),
+    min_value=datetime.date(1871, 1, 1),
+    max_value=datetime.date.today(),
+    help="First retirement month used for withdrawals. Simulations begin from this date."
+)
+end_date = st.sidebar.date_input(
+    "Retirement End Date",
+    value=datetime.date(2018, 3, 31),
+    min_value=datetime.date(1871, 1, 1),
+    max_value=datetime.date.today(),
+    help="Final month to simulate withdrawals."
+)
+analysis_start_date = st.sidebar.date_input(
+    "Historical Analysis Start Date",
+    value=datetime.date(1871, 1, 1),
+    min_value=datetime.date(1871, 1, 1),
+    max_value=datetime.date.today(),
+    help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871)."
+)
 
 # Numeric Inputs
-initial_value = st.sidebar.number_input("Initial Portfolio Value", value=1_000_000, min_value=100_000, step=100_000)
-stock_pct = st.sidebar.slider("Stock Percentage", value=0.75, min_value=0.0, max_value=1.0, step=0.05)
-target_success_rate = st.sidebar.slider("Target Success Rate", value=0.90, min_value=0.0, max_value=1.0, step=0.01)
-upper_guardrail_success = st.sidebar.slider("Upper Guardrail Success Rate", value=1.00, min_value=0.0, max_value=1.0, step=0.01)
-lower_guardrail_success = st.sidebar.slider("Lower Guardrail Success Rate", value=0.75, min_value=0.0, max_value=1.0, step=0.01)
-upper_adjustment_fraction = st.sidebar.slider("Upper Adjustment Fraction", value=1.0, min_value=0.0, max_value=1.0, step=0.05)
-lower_adjustment_fraction = st.sidebar.slider("Lower Adjustment Fraction", value=0.1, min_value=0.0, max_value=1.0, step=0.05)
-adjustment_threshold = st.sidebar.slider("Adjustment Threshold (e.g., 0.05 for 5%)", value=0.05, min_value=0.0, max_value=0.2, step=0.01)
+initial_value = st.sidebar.number_input(
+    "Initial Portfolio Value",
+    value=1_000_000, min_value=100_000, step=100_000,
+    help="Starting portfolio balance in dollars at retirement."
+)
+stock_pct = st.sidebar.slider(
+    "Stock Percentage", value=0.75, min_value=0.0, max_value=1.0, step=0.05,
+    help="Fraction of the portfolio allocated to stocks; remainder to bonds/cash."
+)
+target_success_rate = st.sidebar.slider(
+    "Target Success Rate", value=0.90, min_value=0.0, max_value=1.0, step=0.01,
+    help="Desired probability of sustaining withdrawals without depleting the portfolio across historical periods."
+)
+upper_guardrail_success = st.sidebar.slider(
+    "Upper Guardrail Success Rate", value=1.00, min_value=0.0, max_value=1.0, step=0.01,
+    help="If estimated success rises above this level, increase withdrawals (upper guardrail)."
+)
+lower_guardrail_success = st.sidebar.slider(
+    "Lower Guardrail Success Rate", value=0.75, min_value=0.0, max_value=1.0, step=0.01,
+    help="If estimated success falls below this level, decrease withdrawals (lower guardrail)."
+)
+upper_adjustment_fraction = st.sidebar.slider(
+    "Upper Adjustment Fraction", value=1.0, min_value=0.0, max_value=1.0, step=0.05,
+    help="Proportion to increase withdrawals when above the upper guardrail."
+)
+lower_adjustment_fraction = st.sidebar.slider(
+    "Lower Adjustment Fraction", value=0.1, min_value=0.0, max_value=1.0, step=0.05,
+    help="Proportion to decrease withdrawals when below the lower guardrail."
+)
+adjustment_threshold = st.sidebar.slider(
+    "Adjustment Threshold (e.g., 0.05 for 5%)", value=0.05, min_value=0.0, max_value=0.2, step=0.01,
+    help="Minimum absolute change in estimated success rate required before making an adjustment."
+)
 
-verbose = st.sidebar.checkbox("Verbose Output", value=False)
-
-if st.sidebar.button("Run Simulation"):
+if st.sidebar.button(
+    "Run Simulation",
+    help="Fetch data and run the guardrail withdrawal simulation with the selected parameters."
+):
     st.subheader("Running Simulation...")
     
     # Load data
@@ -51,22 +97,86 @@ if st.sidebar.button("Run Simulation"):
             upper_adjustment_fraction=upper_adjustment_fraction,
             lower_adjustment_fraction=lower_adjustment_fraction,
             adjustment_threshold=adjustment_threshold,
-            verbose=verbose
+            verbose=True
         )
     st.success("Simulation complete!")
 
-    st.subheader("Simulation Results")
-    st.dataframe(results_df)
+    # Charts (table removed)
+    st.subheader("Portfolio Value vs Guardrails")
 
-    st.subheader("Portfolio Value and Withdrawals Over Time")
-    
-    # Placeholder for Highchart - using Streamlit's native line chart for now
-    # For interactive Highcharts, you would typically use a library like `streamlit_highcharts`
-    # or generate Highcharts JSON and use a custom Streamlit component.
-    chart_data = results_df.set_index('Date')[['Portfolio_Value', 'Upper_Guardrail', 'Lower_Guardrail', 'Withdrawal']]
-    st.line_chart(chart_data)
+    fig1 = go.Figure()
+    fig1.add_trace(go.Scatter(
+        x=results_df['Date'], y=results_df['Portfolio_Value'],
+        mode='lines', name='Portfolio Value', line=dict(color='#1f77b4'),
+        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+    ))
+    fig1.add_trace(go.Scatter(
+        x=results_df['Date'], y=results_df['Upper_Guardrail'],
+        mode='lines', name='Upper Guardrail', line=dict(color='#2ca02c'),
+        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+    ))
+    fig1.add_trace(go.Scatter(
+        x=results_df['Date'], y=results_df['Lower_Guardrail'],
+        mode='lines', name='Lower Guardrail', line=dict(color='#d62728'),
+        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+    ))
+    fig1.update_layout(
+        hovermode='x unified',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+        margin=dict(l=10, r=10, t=10, b=10),
+        dragmode='zoom',
+        xaxis=dict(
+            title='Date',
+            type='date',
+            rangeslider=dict(visible=True),
+            hoverformat='%b %d, %Y'
+        ),
+        yaxis=dict(
+            title='Value ($)',
+            tickprefix='$',
+            tickformat=',.0f',
+            automargin=True
+        )
+    )
+    st.plotly_chart(fig1, use_container_width=True, config={'scrollZoom': False})
 
-    st.info("Note: For a fully interactive Highchart with mouse-over details, further integration using a custom component or a dedicated Streamlit Highcharts library would be required.")
+    st.subheader("Withdrawals Over Time")
+
+    init_withdrawal = float(results_df['Withdrawal'].iloc[0])
+
+    fig2 = go.Figure()
+    fig2.add_trace(go.Scatter(
+        x=results_df['Date'], y=results_df['Withdrawal'],
+        mode='lines', name='Withdrawal', line=dict(color='#9467bd'),
+        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+    ))
+    fig2.add_trace(go.Scatter(
+        x=results_df['Date'],
+        y=[init_withdrawal] * len(results_df),
+        mode='lines',
+        name='Initial Withdrawal',
+        line=dict(color='#7f7f7f', dash='dash'),
+        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+    ))
+    fig2.update_layout(
+        hovermode='x unified',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+        margin=dict(l=10, r=10, t=10, b=10),
+        dragmode='zoom',
+        xaxis=dict(
+            title='Date',
+            type='date',
+            rangeslider=dict(visible=True),
+            hoverformat='%b %d, %Y'
+        ),
+        yaxis=dict(
+            title='Withdrawal ($/month)',
+            tickprefix='$',
+            tickformat=',.0f',
+            automargin=True
+        )
+    )
+    st.plotly_chart(fig2, use_container_width=True, config={'scrollZoom': False})
 
 else:
     st.info("Adjust parameters in the sidebar and click 'Run Simulation' to start.")

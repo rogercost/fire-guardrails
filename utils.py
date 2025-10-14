@@ -6,9 +6,6 @@ import numba as nb
 import numpy as np
 import pandas as pd
 import requests
-from scipy import stats
-from scipy.interpolate import RegularGridInterpolator
-from tqdm import tqdm
 
 
 def parse_shiller_date(series):
@@ -340,18 +337,14 @@ def get_guardrail_withdrawals(df, start_date, end_date,
     # State variables
     current_portfolio_value = initial_value
     previous_monthly_spending = initial_value * initial_wr / 12
-    previous_spending_date = pd.to_datetime(start_date)
-
-    # Get CPI data for inflation adjustments
-    cpi_data = df[['Date', 'Consumer Price Index CPI']].copy()
 
     for i, row in subset.iterrows():
         current_date = row['Date']
         months_remaining = len(subset) - i
 
-        def get_withdrawal_rate(num_months, desired_success_rate):
+        def get_withdrawal_rate(success_rate):
             return get_wr_for_fixed_success_rate(df=df,
-                                                 desired_success_rate=desired_success_rate,
+                                                 desired_success_rate=success_rate,
                                                  num_months=months_remaining,
                                                  analysis_start_date=analysis_start_date,
                                                  analysis_end_date=current_date,
@@ -364,21 +357,17 @@ def get_guardrail_withdrawals(df, start_date, end_date,
         # Calculate 3 withdrawal rates: the target, and the upper and lower guardrail, based on the current portfolio
         # value and months remaining
         #
-        target_wr = get_withdrawal_rate(num_months=months_remaining,
-                                        desired_success_rate=target_success_rate)
+        target_wr = get_withdrawal_rate(success_rate=target_success_rate)
 
-        upper_wr = get_withdrawal_rate(num_months=months_remaining,
-                                       desired_success_rate=upper_guardrail_success)
+        upper_wr = get_withdrawal_rate(success_rate=upper_guardrail_success)
 
-        lower_wr = get_withdrawal_rate(num_months=months_remaining,
-                                       desired_success_rate=lower_guardrail_success)
+        lower_wr = get_withdrawal_rate(success_rate=lower_guardrail_success)
 
         # The guardrail portfolio values are the values that would result in the **current** withdrawal amount
         # representing a probability of success equal to each guardrail's probability.
         #
         upper_guardrail_value = previous_monthly_spending / upper_wr * 12
         lower_guardrail_value = previous_monthly_spending / lower_wr * 12
-
 
         if verbose and i % 12 == 0:
             print(f"Processing {current_date.strftime('%Y-%m')}, portfolio=${current_portfolio_value:,.0f}, "
@@ -390,37 +379,15 @@ def get_guardrail_withdrawals(df, start_date, end_date,
 
         # Step 4: Calculate proposed spending adjustment
         if hit_upper:
-            # Re-establish the target spending based on the current portfolio value
-            target_monthly_spending = current_portfolio_value * target_wr / 12
-
-            # Adjust spending upward (target - previous will be positive)
-            new_proposed_spending = (previous_monthly_spending + upper_adjustment_fraction *
-                                     (target_monthly_spending - previous_monthly_spending))
+            desired_success_rate = upper_guardrail_success + upper_adjustment_fraction * (target_success_rate - upper_guardrail_success)
+            new_wr = get_withdrawal_rate(success_rate=desired_success_rate)
+            new_proposed_spending = current_portfolio_value * new_wr / 12
             guardrail_hit = "UPPER"
 
         elif hit_lower:
-            # Re-establish the target spending based on the current portfolio value
-            # target_monthly_spending = current_portfolio_value * target_wr / 12
-
-            # Adjust spending downward (target - previous will be negative)
-            # new_proposed_spending = previous_monthly_spending + lower_adjustment_fraction * (target_monthly_spending - previous_monthly_spending)
-
-            # We are going to bump the probability of success by the configured lower_adjustment_fraction
-            # e.g. if it is set to 10% and our lower guardrail is 25% -> our new spending is going to be based on a 25+10=35% chance of succcess
-
-            # ABSOLUTE
-            # new_wr = get_withdrawal_rate(num_months=months_remaining,
-            #                              desired_success_rate=lower_guardrail_success + lower_adjustment_fraction)
-
-            # RELATIVE
-            desired_success_rate = (lower_guardrail_success + lower_adjustment_fraction *
-                                    (target_success_rate - lower_guardrail_success))
-            new_wr = get_withdrawal_rate(num_months=months_remaining, desired_success_rate=desired_success_rate)
-
-            print(f"Hit lower guardrail, increasing WR rate to {new_wr} which reflects a {desired_success_rate}% sucecss raet")
-
+            desired_success_rate = lower_guardrail_success + lower_adjustment_fraction * (target_success_rate - lower_guardrail_success)
+            new_wr = get_withdrawal_rate(success_rate=desired_success_rate)
             new_proposed_spending = current_portfolio_value * new_wr / 12
-
             guardrail_hit = "LOWER"
 
         else:
@@ -434,7 +401,6 @@ def get_guardrail_withdrawals(df, start_date, end_date,
         if percent_change > adjustment_threshold:
             # Make the adjustment
             actual_monthly_spending = new_proposed_spending
-            previous_spending_date = current_date  # Reset inflation baseline
             adjustment_made = True
         else:
             # Keep previous spending (inflation adjusted)
