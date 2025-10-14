@@ -1,0 +1,24 @@
+[project]
+name = "fire-guardrails-streamlit"
+version = "0.1.0"
+description = "A Streamlit application for guardrail-based withdrawal simulations."
+dependencies = [
+    "streamlit",
+    "pandas",
+    "numpy",
+    "requests",
+    "openpyxl",
+    "numba",
+    "tqdm",
+    "scipy",
+    "xlrd"
+]
+requires-python = ">=3.9"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["streamlit_app", "utils"]
+
