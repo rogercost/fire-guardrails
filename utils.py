@@ -147,10 +147,22 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
                                   analysis_end_date=None,
                                   initial_value=1_000_000, stock_pct=0.75,
                                   tolerance=0.001, max_iterations=50,
-                                  verbose=False):
+                                  verbose=False,
+                                  method='hybrid',
+                                  use_exp_fit=True,
+                                  wr_tolerance=None,
+                                  initial_bounds=(0.0, 0.20),
+                                  allow_expand=True,
+                                  expand_factor=2.0,
+                                  max_bound=1.0):
     """
     Compute the annual withdrawal rate such that a historical simulation over periods of the desired length
     yields the desired success rate.
+
+    This version supports faster convergence via interpolation/extrapolation:
+      - Secant steps on f(wr) = success_rate(wr) - target
+      - Optional exponential fit of ln(1 - SR) ~ a + b*wr when 3+ points exist
+      - Always maintains a bracket for safety; falls back to bisection when needed
 
     Parameters
     ----------
@@ -165,6 +177,8 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
     analysis_start_date : str, optional
         The start date from which we should begin running simulation paths,
         if we do not want to start at the very beginning.
+    analysis_end_date : str | None, optional
+        If set, limit the analysis to dates up to this point (historical-only).
     initial_value : float, optional
         Initial portfolio value (default 1,000,000)
     stock_pct : float, optional
@@ -172,9 +186,23 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
     tolerance : float, optional
         Tolerance for success rate matching (default 0.001 = 0.1%)
     max_iterations : int, optional
-        Maximum iterations for binary search (default 50)
+        Maximum iterations for the solver (default 50)
     verbose : bool, optional
         Print progress (default False)
+    method : {'binary','secant','hybrid'}, optional
+        Which stepping strategy to use. 'hybrid' (default) uses exp-fit, then secant, then bisection fallback.
+    use_exp_fit : bool, optional
+        Try exponential fit ln(1 - SR) ~ a + b*wr when 3+ points exist (default True)
+    wr_tolerance : float | None, optional
+        Optional tolerance on the withdrawal rate bracket width for early stopping.
+    initial_bounds : tuple(float,float), optional
+        Initial [low, high] withdrawal-rate bounds (default (0.0, 0.20))
+    allow_expand : bool, optional
+        Allow expanding bounds if the target is not bracketed initially (default True)
+    expand_factor : float, optional
+        Factor to expand the interval by when bracketing (default 2.0)
+    max_bound : float, optional
+        Hard cap for the upper bound during expansion (default 1.0)
 
     Returns
     -------
@@ -182,8 +210,8 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
         Dictionary containing:
         - 'withdrawal_rate': The annual withdrawal rate that achieves the target success rate
         - 'actual_success_rate': The actual success rate achieved
-        - 'num_simulations': Number of simulation paths run
-        - 'iterations': Number of binary search iterations performed
+        - 'num_simulations': Number of simulation paths run (per evaluation)
+        - 'iterations': Number of solver iterations performed
     """
 
     # Edge case: we can't goal seek if the algo is one ended
@@ -199,78 +227,217 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
                   f"floor of {tolerance}")
         desired_success_rate = tolerance
 
-    # Convert analysis_start_date to datetime
+    # Convert analysis_start_date to datetime and compute data availability for num_paths info
     analysis_start = pd.to_datetime(analysis_start_date)
-
-    # Filter dataframe to only include dates from analysis_start_date onwards
     df_filtered = df[df['Date'] >= analysis_start].copy()
-
-    # Optional: propose an end date. If we're running a historical simulation of this method, we cannot allow
-    # access to future data.
     if analysis_end_date is not None:
         analysis_end = pd.to_datetime(analysis_end_date)
         df_filtered = df_filtered[df_filtered['Date'] <= analysis_end]
 
-    # Get all possible starting dates for simulation periods
     max_end_idx = len(df_filtered) - num_months
     if max_end_idx <= 0:
         raise ValueError(f"Not enough data for {num_months} month simulations starting from {analysis_start_date}")
-
     num_paths = max_end_idx + 1
 
-    # Binary search for the withdrawal rate
-    low_rate = 0  # 0.0% annual withdrawal rate
-    high_rate = 0.20  # 20% annual withdrawal rate
+    # Bracket initialization
+    low_rate, high_rate = initial_bounds
+    low_rate = max(0.0, float(low_rate))
+    high_rate = float(high_rate)
+    if high_rate <= low_rate:
+        raise ValueError("initial_bounds must satisfy high > low")
 
-    iteration = 0
+    # Cache evaluations: wr -> SR
+    eval_cache = {}
+
+    def eval_success_rate(wr: float) -> float:
+        wr_clamped = max(0.0, min(float(wr), max_bound))
+        if wr_clamped in eval_cache:
+            return eval_cache[wr_clamped]
+        sr = calculate_success_rate(
+            df=df,
+            withdrawal_rate=wr_clamped,
+            num_months=num_months,
+            stock_pct=stock_pct,
+            analysis_start_date=analysis_start_date,
+            analysis_end_date=analysis_end_date,
+            initial_value=initial_value
+        )
+        eval_cache[wr_clamped] = sr
+        return sr
+
+    # Evaluate ends and attempt to ensure bracketing on f(wr) = SR(wr) - target
+    sr_low = eval_success_rate(low_rate)
+    sr_high = eval_success_rate(high_rate)
+    f_low = sr_low - desired_success_rate
+    f_high = sr_high - desired_success_rate
+
+    if verbose:
+        print(f"Initial bracket: wr in [{low_rate:.4f}, {high_rate:.4f}], "
+              f"SR(low)={sr_low:.3f}, SR(high)={sr_high:.3f}, target={desired_success_rate:.3f}")
+
+    # Expand bounds if not bracketed and allowed
+    if allow_expand and f_low * f_high > 0:
+        # If both above target, increase high until below or cap
+        expand_iters = 0
+        while f_low > 0 and f_high > 0 and high_rate < max_bound and expand_iters < 20:
+            new_high = min(max_bound, high_rate * expand_factor if high_rate > 0 else initial_bounds[1] * expand_factor)
+            if new_high == high_rate:  # cannot expand further
+                break
+            high_rate = new_high
+            sr_high = eval_success_rate(high_rate)
+            f_high = sr_high - desired_success_rate
+            expand_iters += 1
+            if verbose:
+                print(f"Expanding high -> {high_rate:.4f}, SR={sr_high:.3f}")
+        # If both below target, decrease low toward 0 until above or zero
+        while f_low < 0 and f_high < 0 and low_rate > 0.0 and expand_iters < 40:
+            new_low = max(0.0, low_rate / expand_factor)
+            if new_low == low_rate:
+                break
+            low_rate = new_low
+            sr_low = eval_success_rate(low_rate)
+            f_low = sr_low - desired_success_rate
+            expand_iters += 1
+            if verbose:
+                print(f"Expanding low -> {low_rate:.4f}, SR={sr_low:.3f}")
+
+    # Points history for optional model fits
+    points = {}  # wr -> SR
+    points[low_rate] = sr_low
+    points[high_rate] = sr_high
+
+    def choose_next_wr() -> float:
+        width = high_rate - low_rate
+        mid = (low_rate + high_rate) / 2.0
+
+        # 1) Exponential fit proposal if enabled and enough points
+        wr_exp = None
+        if method in ('hybrid', 'exp') and use_exp_fit and len(points) >= 3:
+            wrs = np.array(sorted(points.keys()))
+            srs = np.array([points[w] for w in wrs])
+            # Guard: values must be strictly within (0,1) for log
+            eps = 1e-12
+            one_minus = np.clip(1.0 - srs, eps, 1.0 - eps)
+            y = np.log(one_minus)
+            X = np.vstack([np.ones_like(wrs), wrs]).T
+            try:
+                a, b = np.linalg.lstsq(X, y, rcond=None)[0]
+                if np.isfinite(b) and abs(b) > 1e-12:
+                    target_y = np.log(np.clip(1.0 - desired_success_rate, eps, 1.0 - eps))
+                    wr_exp = (target_y - a) / b
+            except Exception:
+                wr_exp = None
+
+        # 2) Secant proposal on bracket endpoints
+        wr_secant = None
+        if method in ('hybrid', 'secant') and (f_high - f_low) != 0.0:
+            wr_secant = high_rate - f_high * (high_rate - low_rate) / (f_high - f_low)
+
+        # 3) Midpoint fallback
+        wr_mid = mid
+
+        # Selection strategy: prefer in-bracket exp-fit, else in-bracket secant, else midpoint
+        candidates = []
+        if wr_exp is not None and low_rate < wr_exp < high_rate:
+            candidates.append(('exp', wr_exp))
+        if wr_secant is not None and low_rate < wr_secant < high_rate:
+            candidates.append(('secant', wr_secant))
+
+        if candidates:
+            # Pick the candidate closer to mid (safer) to avoid extremes
+            chosen = min(candidates, key=lambda kv: abs(kv[1] - mid))
+            if verbose:
+                print(f"Choosing {chosen[0]} step -> {chosen[1]:.6f}")
+            return chosen[1]
+
+        # Fallback: midpoint (bisection)
+        if verbose:
+            print(f"Falling back to bisection -> {wr_mid:.6f}")
+        return wr_mid
+
+    iterations = 0
     best_rate = None
     best_success_rate = None
+    best_abs_err = float('inf')
+
+    # Early convergence check on endpoints
+    for wr_check, sr_check in [(low_rate, sr_low), (high_rate, sr_high)]:
+        err = abs(sr_check - desired_success_rate)
+        if err < best_abs_err:
+            best_abs_err = err
+            best_rate = wr_check
+            best_success_rate = sr_check
+    if best_abs_err <= tolerance:
+        if verbose:
+            print("Converged on an endpoint within tolerance.")
+        return {
+            'withdrawal_rate': best_rate,
+            'actual_success_rate': best_success_rate,
+            'num_simulations': num_paths,
+            'iterations': iterations
+        }
 
     if verbose:
         print(f"Searching for withdrawal rate with {desired_success_rate:.1%} success rate...")
 
-    while iteration < max_iterations:
-        mid_rate = (low_rate + high_rate) / 2
-
-        current_success_rate = calculate_success_rate(df, mid_rate, num_months, stock_pct,
-                                                      analysis_start_date, analysis_end_date, initial_value)
-
-        # Check if we're within tolerance
-        if abs(current_success_rate - desired_success_rate) <= tolerance:
-            best_rate = mid_rate
-            best_success_rate = current_success_rate
+    # Main solve loop
+    while iterations < max_iterations:
+        # Stop if bracket width small enough
+        if wr_tolerance is not None and (high_rate - low_rate) <= wr_tolerance:
+            # Choose the midpoint as final
+            final_wr = (low_rate + high_rate) / 2.0
+            final_sr = eval_success_rate(final_wr)
+            if abs(final_sr - desired_success_rate) < best_abs_err:
+                best_rate, best_success_rate, best_abs_err = final_wr, final_sr, abs(final_sr - desired_success_rate)
             if verbose:
-                print(f"Converged! Found withdrawal rate within tolerance.")
+                print(f"Bracket width {high_rate - low_rate:.6g} <= wr_tolerance {wr_tolerance}, stopping.")
             break
 
-        # Adjust search bounds
-        # If success rate is too high, we can withdraw more
-        if current_success_rate > desired_success_rate:
-            low_rate = mid_rate
+        wr_next = choose_next_wr()
+        sr_next = eval_success_rate(wr_next)
+        f_next = sr_next - desired_success_rate
+
+        # Track best
+        abs_err = abs(f_next)
+        if abs_err < best_abs_err:
+            best_abs_err = abs_err
+            best_rate = wr_next
+            best_success_rate = sr_next
+
+        # Check convergence
+        if abs_err <= tolerance:
             if verbose:
-                print(f"Success rate at {mid_rate} is too high ({current_success_rate:.3f} > {desired_success_rate:.3f}), "
-                      f"increasing withdrawal rate range to [{low_rate:.4f}, {high_rate:.4f}]")
+                print("Converged! Found withdrawal rate within tolerance.")
+            best_rate = wr_next
+            best_success_rate = sr_next
+            iterations += 1
+            break
+
+        # Update bracket (SR decreases as WR increases)
+        # If SR too high (> target), we can withdraw more -> move low up
+        # If SR too low (< target), we must withdraw less -> move high down
+        if f_next > 0:
+            low_rate = wr_next
+            sr_low = sr_next
+            f_low = f_next
         else:
-            # If success rate is too low, we need to withdraw less
-            high_rate = mid_rate
-            if verbose:
-                print(f"Success rate at {mid_rate} is too low ({current_success_rate:.3f} < {desired_success_rate:.3f}), "
-                      f"decreasing withdrawal rate range to [{low_rate:.4f}, {high_rate:.4f}]")
+            high_rate = wr_next
+            sr_high = sr_next
+            f_high = f_next
 
-        best_rate = mid_rate
-        best_success_rate = current_success_rate
-        iteration += 1
+        # Add to points for model fit
+        points[wr_next] = sr_next
 
-    if iteration >= max_iterations:
-        if verbose:
-            print(f"Reached maximum iterations ({max_iterations}). Returning best found rate.")
+        iterations += 1
 
-    # Return results
+    if iterations >= max_iterations and verbose:
+        print(f"Reached maximum iterations ({max_iterations}). Returning best found rate.")
+
     return {
         'withdrawal_rate': best_rate,
         'actual_success_rate': best_success_rate,
         'num_simulations': num_paths,
-        'iterations': iteration + 1
+        'iterations': iterations
     }
 
 
