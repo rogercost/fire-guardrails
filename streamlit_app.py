@@ -141,6 +141,14 @@ if st.sidebar.button(
     )
 
     fig1 = go.Figure()
+    # Add fixed-withdrawal portfolio value first so it renders behind others
+    if 'Fixed_WR_Value' in results_df.columns:
+        fig1.add_trace(go.Scatter(
+            x=results_df['Date'], y=results_df['Fixed_WR_Value'],
+            mode='lines', name='Value w/Fixed WR', line=dict(color='#7f7f7f'),
+            opacity=0.6,
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+        ))
     # Draw guardrails first (muted) so portfolio is visually on top
     fig1.add_trace(go.Scatter(
         x=results_df['Date'], y=results_df['Upper_Guardrail'],
@@ -191,7 +199,8 @@ if st.sidebar.button(
             title='Value ($)',
             tickprefix='$',
             tickformat=',.0f',
-            automargin=True
+            automargin=True,
+            rangemode='tozero'
         )
     )
     st.plotly_chart(fig1, use_container_width=True, config={'scrollZoom': False})
@@ -208,7 +217,7 @@ if st.sidebar.button(
     ))
     fig2.add_trace(go.Scatter(
         x=results_df['Date'],
-        y=[init_withdrawal] * len(results_df),
+        y=results_df['Fixed_WR_Withdrawal'] if 'Fixed_WR_Withdrawal' in results_df.columns else [init_withdrawal] * len(results_df),
         mode='lines',
         name='Initial Withdrawal',
         line=dict(color='#7f7f7f', dash='dash'),
@@ -229,13 +238,14 @@ if st.sidebar.button(
             title='Withdrawal ($/month)',
             tickprefix='$',
             tickformat=',.0f',
-            automargin=True
+            automargin=True,
+            rangemode='tozero'
         )
     )
     st.plotly_chart(fig2, use_container_width=True, config={'scrollZoom': False})
 
     # Totals summary under the withdrawals chart
-    total_fixed = float(init_withdrawal) * len(results_df)
+    total_fixed = float(results_df['Fixed_WR_Withdrawal'].sum()) if 'Fixed_WR_Withdrawal' in results_df.columns else float(init_withdrawal) * len(results_df)
     total_guardrails = float(results_df['Withdrawal'].sum())
     diff_ratio = (total_guardrails - total_fixed) / total_fixed if total_fixed else 0.0
 
@@ -257,6 +267,14 @@ else:
         )
 
         fig1 = go.Figure()
+        # Add fixed-withdrawal portfolio value first so it renders behind others
+        if 'Fixed_WR_Value' in results_df.columns:
+            fig1.add_trace(go.Scatter(
+                x=results_df['Date'], y=results_df['Fixed_WR_Value'],
+                mode='lines', name='Value w/Fixed WR', line=dict(color='#7f7f7f'),
+                opacity=0.6,
+                hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            ))
         # Draw guardrails first (muted) so portfolio is visually on top
         fig1.add_trace(go.Scatter(
             x=results_df['Date'], y=results_df['Upper_Guardrail'],
@@ -307,7 +325,8 @@ else:
                 title='Value ($)',
                 tickprefix='$',
                 tickformat=',.0f',
-                automargin=True
+                automargin=True,
+                rangemode='tozero'
             )
         )
         st.plotly_chart(fig1, use_container_width=True, config={'scrollZoom': False})
@@ -324,7 +343,7 @@ else:
         ))
         fig2.add_trace(go.Scatter(
             x=results_df['Date'],
-            y=[init_withdrawal] * len(results_df),
+            y=results_df['Fixed_WR_Withdrawal'] if 'Fixed_WR_Withdrawal' in results_df.columns else [init_withdrawal] * len(results_df),
             mode='lines',
             name='Initial Withdrawal',
             line=dict(color='#7f7f7f', dash='dash'),
@@ -345,13 +364,14 @@ else:
                 title='Withdrawal ($/month)',
                 tickprefix='$',
                 tickformat=',.0f',
-                automargin=True
+                automargin=True,
+                rangemode='tozero'
             )
         )
         st.plotly_chart(fig2, use_container_width=True, config={'scrollZoom': False})
 
         # Totals summary under the withdrawals chart
-        total_fixed = float(init_withdrawal) * len(results_df)
+        total_fixed = float(results_df['Fixed_WR_Withdrawal'].sum()) if 'Fixed_WR_Withdrawal' in results_df.columns else float(init_withdrawal) * len(results_df)
         total_guardrails = float(results_df['Withdrawal'].sum())
         diff_ratio = (total_guardrails - total_fixed) / total_fixed if total_fixed else 0.0
 

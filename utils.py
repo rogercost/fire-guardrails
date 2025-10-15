@@ -342,6 +342,13 @@ def get_guardrail_withdrawals(df, start_date, end_date,
     current_portfolio_value = initial_value
     previous_monthly_spending = initial_value * initial_wr / 12
 
+    # Fixed-withdrawal shadow path initialization
+    fixed_monthly_spending = previous_monthly_spending
+    fixed_portfolio_value = initial_value
+
+    guardrail_depleted = False
+    fixed_depleted = False
+
     for i, row in subset.iterrows():
         current_date = row['Date']
         months_remaining = len(subset) - i
@@ -364,64 +371,78 @@ def get_guardrail_withdrawals(df, start_date, end_date,
                                                  max_iterations=50,
                                                  verbose=False)['withdrawal_rate']
 
-        # Calculate 3 withdrawal rates: the target, and the upper and lower guardrail, based on the current portfolio
-        # value and months remaining
-        #
-        target_wr = get_withdrawal_rate(success_rate=target_success_rate)
+        if not guardrail_depleted:
+            # Calculate 3 withdrawal rates: the target, and the upper and lower guardrail, based on the current portfolio
+            # value and months remaining
+            #
+            target_wr = get_withdrawal_rate(success_rate=target_success_rate)
 
-        upper_wr = get_withdrawal_rate(success_rate=upper_guardrail_success)
+            upper_wr = get_withdrawal_rate(success_rate=upper_guardrail_success)
 
-        lower_wr = get_withdrawal_rate(success_rate=lower_guardrail_success)
+            lower_wr = get_withdrawal_rate(success_rate=lower_guardrail_success)
 
-        # The guardrail portfolio values are the values that would result in the **current** withdrawal amount
-        # representing a probability of success equal to each guardrail's probability.
-        #
-        upper_guardrail_value = previous_monthly_spending / upper_wr * 12
-        lower_guardrail_value = previous_monthly_spending / lower_wr * 12
+            # The guardrail portfolio values are the values that would result in the current withdrawal amount
+            # representing a probability of success equal to each guardrail's probability.
+            #
+            upper_guardrail_value = previous_monthly_spending / upper_wr * 12 if upper_wr > 0 else np.inf
+            lower_guardrail_value = previous_monthly_spending / lower_wr * 12 if lower_wr > 0 else np.inf
 
-        if verbose and i % 12 == 0:
-            print(f"Processing {current_date.strftime('%Y-%m')}, portfolio=${current_portfolio_value:,.0f}, "
-                  f"months_remaining={months_remaining}")
+            if verbose and i % 12 == 0:
+                print(f"Processing {current_date.strftime('%Y-%m')}, portfolio=${current_portfolio_value:,.0f}, "
+                      f"months_remaining={months_remaining}")
 
-        # Step 3: Check if we hit guardrails
-        hit_upper = current_portfolio_value >= upper_guardrail_value
-        hit_lower = current_portfolio_value <= lower_guardrail_value
+            # Step 3: Check if we hit guardrails
+            hit_upper = current_portfolio_value >= upper_guardrail_value
+            hit_lower = current_portfolio_value <= lower_guardrail_value
 
-        # Step 4: Calculate proposed spending adjustment
-        if hit_upper:
-            desired_success_rate = upper_guardrail_success + upper_adjustment_fraction * (target_success_rate - upper_guardrail_success)
-            new_wr = get_withdrawal_rate(success_rate=desired_success_rate)
-            new_proposed_spending = current_portfolio_value * new_wr / 12
-            guardrail_hit = "UPPER"
+            # Step 4: Calculate proposed spending adjustment
+            if hit_upper:
+                desired_success_rate = upper_guardrail_success + upper_adjustment_fraction * (target_success_rate - upper_guardrail_success)
+                new_wr = get_withdrawal_rate(success_rate=desired_success_rate)
+                new_proposed_spending = current_portfolio_value * new_wr / 12
+                guardrail_hit = "UPPER"
 
-        elif hit_lower:
-            desired_success_rate = lower_guardrail_success + lower_adjustment_fraction * (target_success_rate - lower_guardrail_success)
-            new_wr = get_withdrawal_rate(success_rate=desired_success_rate)
-            new_proposed_spending = current_portfolio_value * new_wr / 12
-            guardrail_hit = "LOWER"
+            elif hit_lower:
+                desired_success_rate = lower_guardrail_success + lower_adjustment_fraction * (target_success_rate - lower_guardrail_success)
+                new_wr = get_withdrawal_rate(success_rate=desired_success_rate)
+                new_proposed_spending = current_portfolio_value * new_wr / 12
+                guardrail_hit = "LOWER"
 
+            else:
+                new_proposed_spending = previous_monthly_spending
+                guardrail_hit = "NONE"
+
+            # Step 6: Only adjust if the new dollar amount differs from the previous dollar amount by more than the configured threshold.
+            #
+            percent_change = abs(new_proposed_spending - previous_monthly_spending) / previous_monthly_spending if previous_monthly_spending else 0.0
+
+            if percent_change > adjustment_threshold:
+                # Make the adjustment
+                actual_monthly_spending = new_proposed_spending
+                adjustment_made = True
+            else:
+                # Keep previous spending (inflation adjusted)
+                actual_monthly_spending = previous_monthly_spending
+                adjustment_made = False
         else:
-            new_proposed_spending = previous_monthly_spending
-            guardrail_hit = "NONE"
-
-        # Step 6: Only adjust if the new dollar amount differs from the previous dollar amount by more than the configured threshold.
-        #
-        percent_change = abs(new_proposed_spending - previous_monthly_spending) / previous_monthly_spending
-
-        if percent_change > adjustment_threshold:
-            # Make the adjustment
-            actual_monthly_spending = new_proposed_spending
-            adjustment_made = True
-        else:
-            # Keep previous spending (inflation adjusted)
-            actual_monthly_spending = previous_monthly_spending
+            target_wr = np.nan
+            upper_guardrail_value = 0.0
+            lower_guardrail_value = 0.0
+            actual_monthly_spending = 0.0
             adjustment_made = False
+            guardrail_hit = "DEPLETED"
+            percent_change = 0.0
+
+        # Fixed path withdrawal for this month
+        fixed_actual_withdrawal = 0.0 if fixed_depleted else fixed_monthly_spending
 
         # Store results
         results.append({
             'Date': current_date,
             'Withdrawal': actual_monthly_spending,
             'Portfolio_Value': current_portfolio_value,
+            'Fixed_WR_Value': fixed_portfolio_value,
+            'Fixed_WR_Withdrawal': fixed_actual_withdrawal,
             'Target_WR': target_wr,
             'Upper_Guardrail': upper_guardrail_value,
             'Lower_Guardrail': lower_guardrail_value,
@@ -430,9 +451,10 @@ def get_guardrail_withdrawals(df, start_date, end_date,
             'Adjustment_Made': adjustment_made
         })
 
-        # Update portfolio value for next month
-        # Apply withdrawal
+        # Update portfolio values for next month
+        # Apply withdrawals taken this month
         current_portfolio_value -= actual_monthly_spending
+        fixed_portfolio_value -= fixed_actual_withdrawal
 
         # Apply market returns (if not at end)
         if i < len(subset) - 1:
@@ -440,14 +462,17 @@ def get_guardrail_withdrawals(df, start_date, end_date,
             full_idx = df[df['Date'] == current_date].index[0]
             month_return = portfolio_returns[full_idx + 1] if full_idx + 1 < len(portfolio_returns) else 1.0
             current_portfolio_value *= month_return
+            fixed_portfolio_value *= month_return
+
+        # Floor at zero and mark depletion so future months remain at zero
+        if current_portfolio_value <= 0:
+            current_portfolio_value = 0.0
+            guardrail_depleted = True
+        if fixed_portfolio_value <= 0:
+            fixed_portfolio_value = 0.0
+            fixed_depleted = True
 
         # Update state
         previous_monthly_spending = actual_monthly_spending
-
-        # Check for bankruptcy
-        if current_portfolio_value <= 0:
-            if verbose:
-                print(f"Portfolio depleted at {current_date}")
-            break
 
     return pd.DataFrame(results)
