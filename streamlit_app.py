@@ -125,6 +125,59 @@ adjustment_threshold = st.sidebar.slider(
     help="Minimum absolute change in estimated success rate required before making an adjustment."
 )
 
+# Build current simulation parameters dict for change detection
+sim_params = {
+    'start_date': pd.to_datetime(start_date),
+    'end_date': pd.to_datetime(end_date),
+    'analysis_start_date': pd.to_datetime(analysis_start_date),
+    'initial_value': float(initial_value),
+    'stock_pct': float(stock_pct),
+    'target_success_rate': float(target_success_rate),
+    'upper_guardrail_success': float(upper_guardrail_success),
+    'lower_guardrail_success': float(lower_guardrail_success),
+    'upper_adjustment_fraction': float(upper_adjustment_fraction),
+    'lower_adjustment_fraction': float(lower_adjustment_fraction),
+    'adjustment_threshold': float(adjustment_threshold),
+}
+last_run_params = st.session_state.get('last_run_params')
+dirty = last_run_params is not None and last_run_params != sim_params
+st.session_state['dirty'] = dirty
+
+DIRTY_COLOR = "#8B0000"  # dark red
+
+def render_dirty_banner():
+    st.markdown(
+        f"""
+        <div style="
+            padding: 0.75rem 1rem;
+            margin: 0 0 0.75rem 0;
+            border: 1px solid {DIRTY_COLOR};
+            background: rgba(139,0,0,0.08);
+            color: {DIRTY_COLOR};
+            border-radius: 6px;
+            font-weight: 600;">
+            Inputs changed, please rerun
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+# When inputs change, visually dim and surround the main area with a red border
+if dirty:
+    st.markdown(
+        f"""
+        <style>
+        [data-testid="stAppViewContainer"] > .main {{
+            border: 3px solid {DIRTY_COLOR};
+            border-radius: 8px;
+            padding: 6px;
+            filter: grayscale(30%) brightness(0.95);
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
 
 if st.sidebar.button(
     "Run Simulation",
@@ -181,6 +234,8 @@ if st.sidebar.button(
 
     # Cache results in session state for re-render without recomputation
     st.session_state['results_df'] = results_df
+    st.session_state['last_run_params'] = sim_params
+    st.session_state['dirty'] = False
 
     # Remove status line entirely to place plots at the very top
     status_ph.empty()
@@ -311,6 +366,9 @@ if st.sidebar.button(
 else:
     if 'results_df' in st.session_state:
         results_df = st.session_state['results_df']
+
+        if st.session_state.get('dirty'):
+            render_dirty_banner()
 
         st.subheader("Portfolio Value vs Guardrails")
 
