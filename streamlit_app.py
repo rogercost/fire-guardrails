@@ -3,6 +3,7 @@ import datetime
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
 
 import utils
 
@@ -17,23 +18,36 @@ desc_ph.markdown("This application simulates a guardrail-based retirement withdr
                  "\n\nFor more information, see the "
                  "[official documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
 
+# Mode toggle
+mode = st.radio(
+    "Mode",
+    ["Simulation Mode", "Guidance Mode"],
+    index=0,
+    horizontal=True,
+    key="app_mode"
+)
+is_guidance = (mode == "Guidance Mode")
+
 # Sidebar for inputs
 st.sidebar.header("Simulation Parameters")
 
 # Date Inputs
+today_date = datetime.date.today()
 start_date = st.sidebar.date_input(
     "Retirement Start Date",
-    value=datetime.date(1968, 4, 1),
+    value=today_date if is_guidance else datetime.date(1968, 4, 1),
     min_value=datetime.date(1871, 1, 1),
-    max_value=datetime.date.today(),
-    help="First retirement month used for withdrawals. Simulations begin from this date."
+    max_value=today_date,
+    help="First retirement month used for withdrawals. Simulations begin from this date.",
+    disabled=is_guidance  # In Guidance Mode, this is fixed to today
 )
-end_date = st.sidebar.date_input(
-    "Retirement End Date",
-    value=datetime.date(2018, 3, 31),
-    min_value=datetime.date(1871, 1, 1),
-    max_value=datetime.date.today(),
-    help="Final month to simulate withdrawals."
+retirement_duration_months = st.sidebar.number_input(
+    "Retirement Duration (months)",
+    value=360,
+    min_value=1,
+    max_value=1200,
+    step=12,
+    help="Length of retirement in months. Simulation Mode: end date = start date + duration - 1 month. Guidance Mode: use this horizon from today."
 )
 analysis_start_date = st.sidebar.date_input(
     "Historical Analysis Start Date",
@@ -49,16 +63,31 @@ initial_value = st.sidebar.number_input(
     value=1_000_000, min_value=100_000, step=100_000,
     help="Starting portfolio balance in dollars at retirement."
 )
+
+# New input used by Guidance Mode (hidden/disabled in Simulation Mode)
+current_monthly_spending = st.sidebar.number_input(
+    "Current Monthly Spending",
+    value=3300,
+    min_value=0,
+    step=10,
+    help="Your current monthly spending level. Used only in Guidance Mode to compute guardrail values and hypothetical adjustments.",
+    disabled=not is_guidance,
+    key="current_monthly_spending"
+)
+
 stock_pct = st.sidebar.slider(
     "Stock Percentage", value=0.75, min_value=0.0, max_value=1.0, step=0.05,
     help="Fraction of the portfolio allocated to US stocks; remainder to 10Y treasuries."
 )
 
+# Compute Retirement End Date for Simulation Mode from duration
+computed_end_date = (pd.to_datetime(start_date) + pd.DateOffset(months=int(retirement_duration_months) - 1)).date() if not is_guidance else None
+
 # Compute Initial Withdrawal Rate (IWR) to show in the Target Success Rate label.
 # We recompute only when relevant inputs change to avoid unnecessary calls.
 iwr_params = {
     'start_date': pd.to_datetime(start_date),
-    'end_date': pd.to_datetime(end_date),
+    'duration_months': int(retirement_duration_months),
     'analysis_start_date': pd.to_datetime(analysis_start_date),
     'initial_value': float(initial_value),
     'stock_pct': float(stock_pct),
@@ -74,18 +103,26 @@ try:
             shiller_df = utils.load_shiller_data()
             st.session_state['shiller_df'] = shiller_df
 
-        # Determine horizon length in months based on selected start/end dates
-        subset = shiller_df[(shiller_df["Date"] >= iwr_params['start_date']) & (shiller_df["Date"] <= iwr_params['end_date'])]
-        num_months = len(subset)
-        if num_months <= 0:
-            raise ValueError("No data in selected period to compute initial WR.")
+        # Determine horizon length in months based on duration input
+        if is_guidance:
+            latest_shiller_date = pd.to_datetime(shiller_df["Date"].max())
+            asof_for_iwr = latest_shiller_date if latest_shiller_date <= pd.to_datetime(datetime.date.today()) else pd.to_datetime(datetime.date.today())
+            num_months = int(retirement_duration_months)
+            if num_months <= 0:
+                num_months = 360
+            analysis_end_date_used = asof_for_iwr
+        else:
+            num_months = int(retirement_duration_months)
+            if num_months <= 0:
+                raise ValueError("Invalid retirement duration to compute initial WR.")
+            analysis_end_date_used = iwr_params['start_date']
 
         res = utils.get_wr_for_fixed_success_rate(
             df=shiller_df,
             desired_success_rate=iwr_params['desired_success_rate'],
             num_months=num_months,
             analysis_start_date=iwr_params['analysis_start_date'],
-            analysis_end_date=iwr_params['start_date'],  # As per usage: use retirement START as analysis END
+            analysis_end_date=analysis_end_date_used,  # Use 'today' in Guidance Mode to match label logic
             initial_value=iwr_params['initial_value'],
             stock_pct=iwr_params['stock_pct'],
             tolerance=0.001,
@@ -118,7 +155,7 @@ lower_label_suffix = ""
 try:
     gr_params = {
         'start_date': pd.to_datetime(start_date),
-        'end_date': pd.to_datetime(end_date),
+        'duration_months': int(retirement_duration_months),
         'analysis_start_date': pd.to_datetime(analysis_start_date),
         'initial_value': float(initial_value),
         'stock_pct': float(stock_pct),
@@ -134,11 +171,19 @@ try:
             shiller_df = utils.load_shiller_data()
             st.session_state['shiller_df'] = shiller_df
 
-        # Determine horizon length in months based on selected start/end dates
-        subset = shiller_df[(shiller_df["Date"] >= gr_params['start_date']) & (shiller_df["Date"] <= gr_params['end_date'])]
-        num_months = len(subset)
-        if num_months <= 0:
-            raise ValueError("No data in selected period to compute guardrail labels.")
+        # Determine horizon length in months based on duration input
+        if is_guidance:
+            latest_shiller_date = pd.to_datetime(shiller_df["Date"].max())
+            asof_for_gr = latest_shiller_date if latest_shiller_date <= pd.to_datetime(datetime.date.today()) else pd.to_datetime(datetime.date.today())
+            num_months = int(retirement_duration_months)
+            if num_months <= 0:
+                num_months = 360
+            analysis_end_date_used = asof_for_gr
+        else:
+            num_months = int(retirement_duration_months)
+            if num_months <= 0:
+                raise ValueError("Invalid retirement duration to compute guardrail labels.")
+            analysis_end_date_used = gr_params['start_date']
         if gr_params['iwr'] is None:
             raise ValueError("Initial withdrawal rate unavailable for guardrail label calculation.")
 
@@ -151,7 +196,7 @@ try:
             desired_success_rate=gr_params['upper_sr'],
             num_months=num_months,
             analysis_start_date=gr_params['analysis_start_date'],
-            analysis_end_date=gr_params['start_date'],
+            analysis_end_date=analysis_end_date_used,
             initial_value=gr_params['initial_value'],
             stock_pct=gr_params['stock_pct'],
             tolerance=0.001,
@@ -163,7 +208,7 @@ try:
             desired_success_rate=gr_params['lower_sr'],
             num_months=num_months,
             analysis_start_date=gr_params['analysis_start_date'],
-            analysis_end_date=gr_params['start_date'],
+            analysis_end_date=analysis_end_date_used,
             initial_value=gr_params['initial_value'],
             stock_pct=gr_params['stock_pct'],
             tolerance=0.001,
@@ -224,19 +269,23 @@ lower_adjustment_fraction = st.sidebar.slider(
          "to the target, and our new withdrawal rate will be based on an 80% chance of success.\n\nSetting this higher "
          "is more conservative, and will cause you to make larger spending decreases when you hit the lower guardrail."
 )
+
 adjustment_threshold = st.sidebar.slider(
-    "Adjustment Threshold (e.g., 0.05 for 5%)", value=0.05, min_value=0.0, max_value=0.2, step=0.01,
+    "Adjustment Threshold (e.g., 0.05 for 5%)",
+    value=0.0 if is_guidance else 0.05,
+    min_value=0.0, max_value=0.2, step=0.01,
     help="The minimum percent difference between our new spending and our prior spending, before we make a change.\n\n"
          "Even if we hit a guardrail, we may elect to set this to 5% to avoid making lots of small adjustments. Set it "
          "to 0% to disable it and allow all guardrail hits to trigger spending adjustments.\n\nSetting this higher is "
          "neither aggressive nor conservative, since it impacts spending increases as well as decreases. It is purely "
-         "a question of whether frequent adjustments are acceptable and administratively feasible for the client."
+         "a question of whether frequent adjustments are acceptable and administratively feasible for the client.",
+    disabled=is_guidance  # In Guidance Mode, single-run snapshot ignores threshold
 )
 
 # Build current simulation parameters dict for change detection
 sim_params = {
     'start_date': pd.to_datetime(start_date),
-    'end_date': pd.to_datetime(end_date),
+    'duration_months': int(retirement_duration_months),
     'analysis_start_date': pd.to_datetime(analysis_start_date),
     'initial_value': float(initial_value),
     'stock_pct': float(stock_pct),
@@ -271,7 +320,7 @@ def render_dirty_banner():
     )
 
 # When inputs change, visually dim and surround the main area with a red border
-if dirty:
+if dirty and not is_guidance:
     st.markdown(
         f"""
         <style>
@@ -287,7 +336,79 @@ if dirty:
     )
 
 
-if st.sidebar.button(
+if is_guidance:
+    # Guidance Mode: run a single-iteration snapshot and display text output
+    title_ph.empty()
+    desc_ph.empty()
+
+    # Load Shiller data (cached)
+    shiller_df = st.session_state.get('shiller_df')
+    if shiller_df is None:
+        shiller_df = utils.load_shiller_data()
+        st.session_state['shiller_df'] = shiller_df
+
+    # Use the latest available Shiller data date (<= today) as the as-of date.
+    today = datetime.date.today()
+    latest_shiller_date = pd.to_datetime(shiller_df["Date"].max()).date()
+    asof_date = latest_shiller_date if latest_shiller_date <= today else today
+
+
+    try:
+        snap = utils.compute_guardrail_guidance_snapshot(
+            df=shiller_df,
+            asof_date=asof_date,
+            duration_months=int(retirement_duration_months),
+            analysis_start_date=analysis_start_date,
+            current_portfolio_value=initial_value,
+            current_monthly_spending=st.session_state.get("current_monthly_spending", 40000.0),
+            stock_pct=stock_pct,
+            target_success_rate=target_success_rate,
+            upper_guardrail_success=upper_guardrail_success,
+            lower_guardrail_success=lower_guardrail_success,
+            upper_adjustment_fraction=upper_adjustment_fraction,
+            lower_adjustment_fraction=lower_adjustment_fraction,
+            verbose=False
+        )
+
+        def fmt_money(x):
+            # Escape the dollar sign so Streamlit Markdown doesn't interpret $...$ as LaTeX math
+            return f"\\${x:,.0f}" if (x is not None and (isinstance(x, (int, float)) and not np.isinf(x))) else "N/A"
+
+        def fmt_pct(p):
+            return f"{p*100:+.0f}%" if p is not None else "N/A"
+
+        start_wr = st.session_state.get("iwr_value", snap.get("target_withdrawal_rate"))
+        start_month = snap.get("target_monthly_spending")
+        start_year = (start_month * 12.0) if start_month is not None else None
+
+        upper_val = snap.get("upper_guardrail_value")
+        lower_val = snap.get("lower_guardrail_value")
+
+        up_adj_pct = snap.get("upper_adjustment_pct")
+        up_adj_month = snap.get("upper_adjusted_monthly")
+        up_adj_year = (up_adj_month * 12.0) if up_adj_month is not None else None
+
+        low_adj_pct = snap.get("lower_adjustment_pct")
+        low_adj_month = snap.get("lower_adjusted_monthly")
+        low_adj_year = (low_adj_month * 12.0) if low_adj_month is not None else None
+
+        st.subheader("Guidance Mode")
+        st.markdown(
+            f"Target Withdrawal Rate: {start_wr*100:.2f}% ({fmt_money(start_month)}/month or {fmt_money(start_year)}/year)"
+            if start_wr is not None else
+            "Starting Withdrawal Rate: N/A"
+        )
+        st.markdown(
+            f"Upper Guardrail Portfolio Value: {fmt_money(upper_val)}  ->  if hit, spending adjusts by {fmt_pct(up_adj_pct)} to {fmt_money(up_adj_month)}/month or {fmt_money(up_adj_year)}/year"
+        )
+        st.markdown(
+            f"Lower Guardrail Portfolio Value: {fmt_money(lower_val)}  ->  if hit, spending adjusts by {fmt_pct(low_adj_pct)} to {fmt_money(low_adj_month)}/month or {fmt_money(low_adj_year)}/year"
+        )
+
+    except Exception as e:
+        st.error(f"Unable to compute guidance snapshot: {e}")
+
+elif st.sidebar.button(
     "Run Simulation",
     help="Fetch data and run the guardrail withdrawal simulation with the selected parameters."
 ):
@@ -325,7 +446,7 @@ if st.sidebar.button(
     results_df = utils.get_guardrail_withdrawals(
         df=shiller_df,
         start_date=start_date,
-        end_date=end_date,
+        end_date=computed_end_date,
         analysis_start_date=analysis_start_date,
         initial_value=initial_value,
         stock_pct=stock_pct,
@@ -471,7 +592,7 @@ if st.sidebar.button(
     st.markdown(f"Total Withdrawal (Using Guardrails): ${total_guardrails:,.0f}")
     st.markdown(f"Difference: {diff_ratio:+.0%}")
 
-else:
+elif not is_guidance:
     if 'results_df' in st.session_state:
         results_df = st.session_state['results_df']
 

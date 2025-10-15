@@ -476,3 +476,128 @@ def get_guardrail_withdrawals(df, start_date, end_date,
         previous_monthly_spending = actual_monthly_spending
 
     return pd.DataFrame(results)
+
+def compute_guardrail_guidance_snapshot(
+    df,
+    asof_date,
+    duration_months,
+    analysis_start_date="1871-01-01",
+    current_portfolio_value=1_000_000.0,
+    current_monthly_spending=40_000.0,
+    stock_pct=0.75,
+    target_success_rate=0.90,
+    upper_guardrail_success=1.00,
+    lower_guardrail_success=0.75,
+    upper_adjustment_fraction=1.0,
+    lower_adjustment_fraction=0.1,
+    verbose=False,
+):
+    """
+    Compute a single-point guidance snapshot (no historical loop), suitable for client/adviser use.
+
+    This mirrors the first-iteration logic in get_guardrail_withdrawals:
+      - Determine months_remaining based on [asof_date .. end_date]
+      - Compute WRs at target, upper, lower success rates using analysis_end_date=asof_date
+      - Guardrail portfolio values are the PVs at which CURRENT spending would equal those WRs
+      - Hypothetical adjustments on guardrail hit are computed by moving partway back toward the target
+        using the upper/lower adjustment fractions. Threshold gating is intentionally ignored.
+
+    Returns a dict with:
+      - implied_withdrawal_rate               (float | None)
+      - target_withdrawal_rate               (float | None)
+      - target_monthly_spending              (float | None)
+      - upper_guardrail_value                (float | inf)
+      - lower_guardrail_value                (float | inf)
+      - upper_adjusted_monthly               (float | None)
+      - upper_adjustment_pct                 (float | None; relative to current_monthly_spending)
+      - lower_adjusted_monthly               (float | None)
+      - lower_adjustment_pct                 (float | None; relative to current_monthly_spending)
+      - months_remaining                     (int)
+      - asof_date                            (pd.Timestamp)
+    """
+    asof = pd.to_datetime(asof_date)
+
+    # Determine months remaining directly from configured duration
+    num_months = int(duration_months)
+    if num_months <= 0:
+        # Fallback to a standard 30-year horizon
+        num_months = 360
+
+    # Helper to compute WR for a given success rate at 'asof'
+    def _wr(desired_sr: float):
+        res = get_wr_for_fixed_success_rate(
+            df=df,
+            desired_success_rate=float(desired_sr),
+            num_months=num_months,
+            analysis_start_date=analysis_start_date,
+            analysis_end_date=asof,
+            initial_value=float(current_portfolio_value),
+            stock_pct=float(stock_pct),
+            tolerance=0.001,
+            max_iterations=50,
+            verbose=False,
+        )
+        return float(res["withdrawal_rate"]) if res["withdrawal_rate"] is not None else None
+
+    target_wr = _wr(target_success_rate)
+    upper_wr = _wr(upper_guardrail_success)
+    lower_wr = _wr(lower_guardrail_success)
+
+    # Base first-month spending using the target WR (matches label logic)
+    base_monthly_spending = (float(current_portfolio_value) * target_wr / 12.0) if target_wr is not None else None
+
+    # Guardrail PVs where CURRENT spending equals the WR for upper/lower SRs (matches simulation logic)
+    use_spending = float(current_monthly_spending) if current_monthly_spending is not None else None
+
+    if upper_wr is not None and upper_wr > 0 and use_spending is not None:
+        upper_guardrail_value = use_spending / upper_wr * 12.0
+    else:
+        upper_guardrail_value = np.inf
+
+    if lower_wr is not None and lower_wr > 0 and use_spending is not None:
+        lower_guardrail_value = use_spending / lower_wr * 12.0
+    else:
+        lower_guardrail_value = np.inf
+
+    # Hypothetical adjustment targets if guardrails were hit (move back toward target)
+    desired_upper_sr = upper_guardrail_success + upper_adjustment_fraction * (target_success_rate - upper_guardrail_success)
+    desired_lower_sr = lower_guardrail_success + lower_adjustment_fraction * (target_success_rate - lower_guardrail_success)
+
+    adj_upper_wr = _wr(desired_upper_sr)
+    adj_lower_wr = _wr(desired_lower_sr)
+
+    # At a guardrail hit, the simulation computes the new spending using the portfolio value at the hit.
+    # Mirror that here by using the guardrail PVs rather than today's PV for the hypothetical adjustments.
+    adj_upper_monthly = (
+        float(upper_guardrail_value) * adj_upper_wr / 12.0
+        if (adj_upper_wr is not None and np.isfinite(upper_guardrail_value))
+        else None
+    )
+    adj_lower_monthly = (
+        float(lower_guardrail_value) * adj_lower_wr / 12.0
+        if (adj_lower_wr is not None and np.isfinite(lower_guardrail_value))
+        else None
+    )
+
+    # Percent change relative to CURRENT spending
+    def _pct_change(new_amt):
+        if new_amt is None or float(current_monthly_spending) == 0.0:
+            return None
+        return (float(new_amt) - float(current_monthly_spending)) / float(current_monthly_spending)
+
+    implied_wr = (float(current_monthly_spending) * 12.0 / float(current_portfolio_value)) if float(current_portfolio_value) > 0 else None
+    target_monthly_spending = (float(current_portfolio_value) * target_wr / 12.0) if target_wr is not None else None
+
+    return {
+        "asof_date": asof,
+        "months_remaining": num_months,
+        "implied_withdrawal_rate": implied_wr,
+        "target_withdrawal_rate": target_wr,
+        "target_monthly_spending": target_monthly_spending,
+        "upper_guardrail_value": upper_guardrail_value,
+        "lower_guardrail_value": lower_guardrail_value,
+        "upper_adjusted_monthly": adj_upper_monthly,
+        "upper_adjustment_pct": _pct_change(adj_upper_monthly),
+        "lower_adjusted_monthly": adj_lower_monthly,
+        "lower_adjustment_pct": _pct_change(adj_lower_monthly),
+    }
