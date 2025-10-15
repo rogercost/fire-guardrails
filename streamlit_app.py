@@ -9,24 +9,20 @@ import utils
 
 st.set_page_config(layout="wide", page_title="Guardrail Withdrawal Simulator")
 
-title_ph = st.empty()
-desc_ph = st.empty()
-title_ph.title("Guardrail-Based Withdrawal Strategy Simulator")
-desc_ph.markdown("This application simulates a guardrail-based retirement withdrawal strategy based on historical "
-                 "market data.\n\nThe premise is that by adjusting spending in response to market conditions as we move "
-                 "through retirement, we can not only increase our chances of success, but spend more while doing it."
-                 "\n\nFor more information, see the "
-                 "[official documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
-
-# Mode toggle
+# Mode toggle (top, persistent)
 mode = st.radio(
     "Mode",
     ["Simulation Mode", "Guidance Mode"],
     index=0,
     horizontal=True,
-    key="app_mode"
+    key="app_mode",
+    label_visibility="collapsed"
 )
 is_guidance = (mode == "Guidance Mode")
+
+title_ph = st.empty()
+desc_ph = st.empty()
+
 
 # Sidebar for inputs
 st.sidebar.header("Simulation Parameters")
@@ -38,7 +34,8 @@ start_date = st.sidebar.date_input(
     value=today_date if is_guidance else datetime.date(1968, 4, 1),
     min_value=datetime.date(1871, 1, 1),
     max_value=today_date,
-    help="First retirement month used for withdrawals. Simulations begin from this date.",
+    help="First retirement month used for withdrawals.\n\nIn Simulation Mode, the historical simulations begin from this date.\n\n"
+         "In Guidance Mode, this defaults to today. Even if retirement is already underway, the guidance is forward looking from today.",
     disabled=is_guidance  # In Guidance Mode, this is fixed to today
 )
 retirement_duration_months = st.sidebar.number_input(
@@ -47,14 +44,16 @@ retirement_duration_months = st.sidebar.number_input(
     min_value=1,
     max_value=1200,
     step=12,
-    help="Length of retirement in months. Simulation Mode: end date = start date + duration - 1 month. Guidance Mode: use this horizon from today."
+    help="Length of retirement in months.\n\nIn Guidance Mode, this should be the remaining number of months, if retirement is already underway."
 )
 analysis_start_date = st.sidebar.date_input(
     "Historical Analysis Start Date",
     value=datetime.date(1871, 1, 1),
     min_value=datetime.date(1871, 1, 1),
     max_value=datetime.date.today(),
-    help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871)."
+    help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nNote that when running historical "
+         "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
+         "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!"
 )
 
 # Numeric Inputs
@@ -278,7 +277,8 @@ adjustment_threshold = st.sidebar.slider(
          "Even if we hit a guardrail, we may elect to set this to 5% to avoid making lots of small adjustments. Set it "
          "to 0% to disable it and allow all guardrail hits to trigger spending adjustments.\n\nSetting this higher is "
          "neither aggressive nor conservative, since it impacts spending increases as well as decreases. It is purely "
-         "a question of whether frequent adjustments are acceptable and administratively feasible for the client.",
+         "a question of whether frequent adjustments are acceptable and administratively feasible for the client.\n\n"
+         "Not used in Guidance Mode, which will always show spending adjustment suggestions, no matter how small.",
     disabled=is_guidance  # In Guidance Mode, single-run snapshot ignores threshold
 )
 
@@ -338,8 +338,6 @@ if dirty and not is_guidance:
 
 if is_guidance:
     # Guidance Mode: run a single-iteration snapshot and display text output
-    title_ph.empty()
-    desc_ph.empty()
 
     # Load Shiller data (cached)
     shiller_df = st.session_state.get('shiller_df')
@@ -393,16 +391,22 @@ if is_guidance:
         low_adj_year = (low_adj_month * 12.0) if low_adj_month is not None else None
 
         st.subheader("Guidance Mode")
+        st.markdown("Use this mode to generate forward-looking guidance for a client who is retired today and in drawdown.\n\n"
+                    "For more information, see the [official documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
+
         st.markdown(
-            f"Target Withdrawal Rate: {start_wr*100:.2f}% ({fmt_money(start_month)}/month or {fmt_money(start_year)}/year)"
+            f"* **Target Withdrawal Rate:** {start_wr*100:.2f}% ({fmt_money(start_month)}/month or {fmt_money(start_year)}/year "
+            f"based on the Initial Portfolio Value)"
             if start_wr is not None else
-            "Starting Withdrawal Rate: N/A"
+            "**Starting Withdrawal Rate:** N/A"
         )
         st.markdown(
-            f"Upper Guardrail Portfolio Value: {fmt_money(upper_val)}  ->  if hit, spending adjusts by {fmt_pct(up_adj_pct)} to {fmt_money(up_adj_month)}/month or {fmt_money(up_adj_year)}/year"
+            f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Current Monthly Spending\n  * If client's portfolio value exceeds this, adjust "
+            f"spending by {fmt_pct(up_adj_pct)} to {fmt_money(up_adj_month)}/month or {fmt_money(up_adj_year)}/year"
         )
         st.markdown(
-            f"Lower Guardrail Portfolio Value: {fmt_money(lower_val)}  ->  if hit, spending adjusts by {fmt_pct(low_adj_pct)} to {fmt_money(low_adj_month)}/month or {fmt_money(low_adj_year)}/year"
+            f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Current Monthly Spending\n  * If client's portfolio value falls below this, adjust "
+            f"spending by {fmt_pct(low_adj_pct)} to {fmt_money(low_adj_month)}/month or {fmt_money(low_adj_year)}/year"
         )
 
     except Exception as e:
@@ -412,9 +416,6 @@ elif st.sidebar.button(
     "Run Simulation",
     help="Fetch data and run the guardrail withdrawal simulation with the selected parameters."
 ):
-    # Hide header/title block and use a single status line to save vertical space
-    title_ph.empty()
-    desc_ph.empty()
 
     status_ph = st.empty()
     status_ph.text("Loading Shiller data...")
@@ -468,6 +469,8 @@ elif st.sidebar.button(
 
     # Remove status line entirely to place plots at the very top
     status_ph.empty()
+
+    st.subheader("Simulation Mode")
 
     # Charts (table removed)
     st.subheader("Portfolio Value vs Guardrails")
@@ -599,6 +602,7 @@ elif not is_guidance:
         if st.session_state.get('dirty'):
             render_dirty_banner()
 
+        st.subheader("Simulation Mode")
         st.subheader("Portfolio Value vs Guardrails")
 
         show_guardrail_hits = st.checkbox(
@@ -721,4 +725,7 @@ elif not is_guidance:
         st.markdown(f"Total Withdrawal (Using Guardrails): ${total_guardrails:,.0f}")
         st.markdown(f"Difference: {diff_ratio:+.0%}")
     else:
+        st.subheader("Simulation Mode")
+        st.markdown("Use this mode to simulate running a guardrail-based retirement withdrawal strategy during a historical period.\n\n"
+                    "For more information, see the [official documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
         st.info("Adjust parameters in the sidebar and click 'Run Simulation' to start.")
