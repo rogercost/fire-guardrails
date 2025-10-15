@@ -2,6 +2,7 @@ import datetime
 
 import streamlit as st
 import plotly.graph_objects as go
+import pandas as pd
 
 import utils
 
@@ -48,9 +49,60 @@ stock_pct = st.sidebar.slider(
     "Stock Percentage", value=0.75, min_value=0.0, max_value=1.0, step=0.05,
     help="Fraction of the portfolio allocated to stocks; remainder to bonds/cash."
 )
+
+# Compute Initial Withdrawal Rate (IWR) to show in the Target Success Rate label.
+# We recompute only when relevant inputs change to avoid unnecessary calls.
+iwr_params = {
+    'start_date': pd.to_datetime(start_date),
+    'end_date': pd.to_datetime(end_date),
+    'analysis_start_date': pd.to_datetime(analysis_start_date),
+    'initial_value': float(initial_value),
+    'stock_pct': float(stock_pct),
+    # Use current target_success_rate if available, otherwise default of 0.90
+    'desired_success_rate': float(st.session_state.get('target_success_rate', 0.90)),
+}
+iwr_label_suffix = ""
+try:
+    if 'iwr_params' not in st.session_state or st.session_state['iwr_params'] != iwr_params:
+        # Ensure Shiller data is loaded or cached in session_state
+        shiller_df = st.session_state.get('shiller_df')
+        if shiller_df is None:
+            shiller_df = utils.load_shiller_data()
+            st.session_state['shiller_df'] = shiller_df
+
+        # Determine horizon length in months based on selected start/end dates
+        subset = shiller_df[(shiller_df["Date"] >= iwr_params['start_date']) & (shiller_df["Date"] <= iwr_params['end_date'])]
+        num_months = len(subset)
+        if num_months <= 0:
+            raise ValueError("No data in selected period to compute initial WR.")
+
+        res = utils.get_wr_for_fixed_success_rate(
+            df=shiller_df,
+            desired_success_rate=iwr_params['desired_success_rate'],
+            num_months=num_months,
+            analysis_start_date=iwr_params['analysis_start_date'],
+            analysis_end_date=iwr_params['start_date'],  # As per usage: use retirement START as analysis END
+            initial_value=iwr_params['initial_value'],
+            stock_pct=iwr_params['stock_pct'],
+            tolerance=0.001,
+            max_iterations=50,
+            verbose=False
+        )
+        st.session_state['iwr_value'] = float(res['withdrawal_rate']) if res['withdrawal_rate'] is not None else None
+        st.session_state['iwr_params'] = iwr_params
+
+    iwr = st.session_state.get('iwr_value')
+    if iwr is not None:
+        iwr_label_suffix = f" (Initial WR: {iwr*100:.2f}%)"
+    else:
+        iwr_label_suffix = " (Initial WR: N/A)"
+except Exception:
+    iwr_label_suffix = " (Initial WR: N/A)"
+target_success_label = f"Target Success Rate{iwr_label_suffix}"
 target_success_rate = st.sidebar.slider(
-    "Target Success Rate", value=0.90, min_value=0.0, max_value=1.0, step=0.01,
-    help="Desired probability of sustaining withdrawals without depleting the portfolio across historical periods."
+    target_success_label, value=st.session_state.get("target_success_rate", 0.90), min_value=0.0, max_value=1.0, step=0.01,
+    help="Desired probability of sustaining withdrawals without depleting the portfolio across historical periods.",
+    key="target_success_rate"
 )
 upper_guardrail_success = st.sidebar.slider(
     "Upper Guardrail Success Rate", value=1.00, min_value=0.0, max_value=1.0, step=0.01,
@@ -84,7 +136,10 @@ if st.sidebar.button(
 
     status_ph = st.empty()
     status_ph.text("Loading Shiller data...")
-    shiller_df = utils.load_shiller_data()
+    shiller_df = st.session_state.get('shiller_df')
+    if shiller_df is None:
+        shiller_df = utils.load_shiller_data()
+        st.session_state['shiller_df'] = shiller_df
     status_ph.text("Shiller data loaded.")
 
     # Progress bar shown in the same status line area (0% -> 100%)
