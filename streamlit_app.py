@@ -112,21 +112,101 @@ target_success_rate = st.sidebar.slider(
          "the probability that your first adjustment will be a decrease as opposed to an increase in spending.",
     key="target_success_rate"
 )
+# Compute dynamic labels for Guardrail Success Rates showing initial (first period) PVs
+upper_label_suffix = ""
+lower_label_suffix = ""
+try:
+    gr_params = {
+        'start_date': pd.to_datetime(start_date),
+        'end_date': pd.to_datetime(end_date),
+        'analysis_start_date': pd.to_datetime(analysis_start_date),
+        'initial_value': float(initial_value),
+        'stock_pct': float(stock_pct),
+        'upper_sr': float(st.session_state.get("upper_guardrail_success", 1.00)),
+        'lower_sr': float(st.session_state.get("lower_guardrail_success", 0.75)),
+        'iwr': float(st.session_state.get('iwr_value')) if st.session_state.get('iwr_value') is not None else None,
+    }
+
+    if ('guardrail_params' not in st.session_state) or (st.session_state['guardrail_params'] != gr_params):
+        # Ensure Shiller data is available
+        shiller_df = st.session_state.get('shiller_df')
+        if shiller_df is None:
+            shiller_df = utils.load_shiller_data()
+            st.session_state['shiller_df'] = shiller_df
+
+        # Determine horizon length in months based on selected start/end dates
+        subset = shiller_df[(shiller_df["Date"] >= gr_params['start_date']) & (shiller_df["Date"] <= gr_params['end_date'])]
+        num_months = len(subset)
+        if num_months <= 0:
+            raise ValueError("No data in selected period to compute guardrail labels.")
+        if gr_params['iwr'] is None:
+            raise ValueError("Initial withdrawal rate unavailable for guardrail label calculation.")
+
+        # Initial withdrawal rate and first-period spending (already computed above for target label)
+        first_month_spending = gr_params['initial_value'] * gr_params['iwr'] / 12.0
+
+        # Compute WRs at start of retirement using retirement start date as analysis end date
+        upper_res = utils.get_wr_for_fixed_success_rate(
+            df=shiller_df,
+            desired_success_rate=gr_params['upper_sr'],
+            num_months=num_months,
+            analysis_start_date=gr_params['analysis_start_date'],
+            analysis_end_date=gr_params['start_date'],
+            initial_value=gr_params['initial_value'],
+            stock_pct=gr_params['stock_pct'],
+            tolerance=0.001,
+            max_iterations=50,
+            verbose=False
+        )
+        lower_res = utils.get_wr_for_fixed_success_rate(
+            df=shiller_df,
+            desired_success_rate=gr_params['lower_sr'],
+            num_months=num_months,
+            analysis_start_date=gr_params['analysis_start_date'],
+            analysis_end_date=gr_params['start_date'],
+            initial_value=gr_params['initial_value'],
+            stock_pct=gr_params['stock_pct'],
+            tolerance=0.001,
+            max_iterations=50,
+            verbose=False
+        )
+
+        upper_wr = float(upper_res['withdrawal_rate']) if upper_res['withdrawal_rate'] is not None else None
+        lower_wr = float(lower_res['withdrawal_rate']) if lower_res['withdrawal_rate'] is not None else None
+
+        upper_pv = first_month_spending / upper_wr * 12 if (upper_wr is not None and upper_wr > 0) else None
+        lower_pv = first_month_spending / lower_wr * 12 if (lower_wr is not None and lower_wr > 0) else None
+
+        st.session_state['upper_label_suffix'] = f" (Initial PV: ${upper_pv:,.0f})" if upper_pv is not None else " (Initial PV: N/A)"
+        st.session_state['lower_label_suffix'] = f" (Initial PV: ${lower_pv:,.0f})" if lower_pv is not None else " (Initial PV: N/A)"
+        st.session_state['guardrail_params'] = gr_params
+
+    upper_label_suffix = st.session_state.get('upper_label_suffix', " (Initial PV: N/A)")
+    lower_label_suffix = st.session_state.get('lower_label_suffix', " (Initial PV: N/A)")
+except Exception:
+    upper_label_suffix = " (Initial PV: N/A)"
+    lower_label_suffix = " (Initial PV: N/A)"
+
+upper_guardrail_label = f"Upper Guardrail Success Rate{upper_label_suffix}"
+lower_guardrail_label = f"Lower Guardrail Success Rate{lower_label_suffix}"
+
 upper_guardrail_success = st.sidebar.slider(
-    "Upper Guardrail Success Rate", value=1.00, min_value=0.0, max_value=1.0, step=0.01,
+    upper_guardrail_label, value=st.session_state.get("upper_guardrail_success", 1.00), min_value=0.0, max_value=1.0, step=0.01,
     help="The withdrawal rate used to calculate the upper guardrail portfolio value.\n\nThis is the value where the "
          "current withdrawal amount, if held constant, will succeed this frequently or more, for all periods with "
          "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
          "simulation date.\n\nSetting this higher is more conservative, and will cause you to wait longer to increase "
-         "your spending when markets are up."
+         "your spending when markets are up.",
+    key="upper_guardrail_success"
 )
 lower_guardrail_success = st.sidebar.slider(
-    "Lower Guardrail Success Rate", value=0.75, min_value=0.0, max_value=1.0, step=0.01,
+    lower_guardrail_label, value=st.session_state.get("lower_guardrail_success", 0.75), min_value=0.0, max_value=1.0, step=0.01,
     help="The withdrawal rate used to calculate the lower guardrail portfolio value.\n\nThis is the value where the "
          "current withdrawal amount, if held constant, will succeed this frequently or less, for all periods with "
          "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
          "simulation date.\n\nSetting this higher is more conservative, and will cause you to decrease your spending "
-         "sooner when markets are down."
+         "sooner when markets are down.",
+    key="lower_guardrail_success"
 )
 upper_adjustment_fraction = st.sidebar.slider(
     "Upper Adjustment Fraction", value=1.0, min_value=0.0, max_value=1.0, step=0.05,
