@@ -105,45 +105,52 @@ except Exception:
 target_success_label = f"Target Success Rate{iwr_label_suffix}"
 target_success_rate = st.sidebar.slider(
     target_success_label, value=st.session_state.get("target_success_rate", 0.90), min_value=0.0, max_value=1.0, step=0.01,
-    help="Desired probability of success that will be used to select an initial withdrawal rate. The initial "
+    help="Desired probability of success that will be used to select an initial withdrawal rate.\n\nThe initial "
          "withdrawal rate will be the rate at which fixed withdrawals over all periods of time with length = the "
          "configured retirement period length, between the Historical Analysis Start Date and the Retirement Start "
-         "Date, end with >0 values this percent of the time.",
+         "Date, end with >0 values this percent of the time.\n\nSetting this higher is more aggressive, and increases "
+         "the probability that your first adjustment will be a decrease as opposed to an increase in spending.",
     key="target_success_rate"
 )
 upper_guardrail_success = st.sidebar.slider(
     "Upper Guardrail Success Rate", value=1.00, min_value=0.0, max_value=1.0, step=0.01,
-    help="The withdrawal rate used to calculate the upper guardrail portfolio value, which is the value where the "
+    help="The withdrawal rate used to calculate the upper guardrail portfolio value.\n\nThis is the value where the "
          "current withdrawal amount, if held constant, will succeed this frequently or more, for all periods with "
          "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
-         "simulation date."
+         "simulation date.\n\nSetting this higher is more conservative, and will cause you to wait longer to increase "
+         "your spending when markets are up."
 )
 lower_guardrail_success = st.sidebar.slider(
     "Lower Guardrail Success Rate", value=0.75, min_value=0.0, max_value=1.0, step=0.01,
-    help="The withdrawal rate used to calculate the lower guardrail portfolio value, which is the value where the "
+    help="The withdrawal rate used to calculate the lower guardrail portfolio value.\n\nThis is the value where the "
          "current withdrawal amount, if held constant, will succeed this frequently or less, for all periods with "
          "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
-         "simulation date."
+         "simulation date.\n\nSetting this higher is more conservative, and will cause you to decrease your spending "
+         "sooner when markets are down."
 )
 upper_adjustment_fraction = st.sidebar.slider(
     "Upper Adjustment Fraction", value=1.0, min_value=0.0, max_value=1.0, step=0.05,
-    help="How much to increase spending when we hit the upper guardrail. Expressed as a % of the distance between the "
-         "Upper Guardrail Success Rate and the Target Success Rate. For example, if the upper guardrail represents "
-         "100% success and the target is 90%, setting this value to 50% means we go half the distance back to the "
-         "target, and our new withdrawal rate will be based on a 95% chance of success."
+    help="How much to increase spending when we hit the upper guardrail.\n\nExpressed as a % of the distance between "
+         "the Upper Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the upper guardrail "
+         "represents 100% success and the target is 90%, setting this value to 50% means we go half the distance back "
+         "to the target, and our new withdrawal rate will be based on a 95% chance of success.\n\nSetting this higher "
+         "is more aggressive, and will cause you to make larger spending increases when you hit the upper guardrail."
 )
 lower_adjustment_fraction = st.sidebar.slider(
     "Lower Adjustment Fraction", value=0.1, min_value=0.0, max_value=1.0, step=0.05,
-    help="How much to decrease spending when we hit the lower guardrail. Expressed as a % of the distance between the "
-         "Lower Guardrail Success Rate and the Target Success Rate. For example, if the lower guardrail represents 70% "
-         "success and the target is 90%, setting this value to 50% means we go half the distance back to the target, "
-         "and our new withdrawal rate will be based on an 80% chance of success."
+    help="How much to decrease spending when we hit the lower guardrail.\n\nExpressed as a % of the distance between "
+         "the Lower Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the lower guardrail "
+         "represents 70% success and the target is 90%, setting this value to 50% means we go half the distance back "
+         "to the target, and our new withdrawal rate will be based on an 80% chance of success.\n\nSetting this higher "
+         "is more conservative, and will cause you to make larger spending decreases when you hit the lower guardrail."
 )
 adjustment_threshold = st.sidebar.slider(
     "Adjustment Threshold (e.g., 0.05 for 5%)", value=0.05, min_value=0.0, max_value=0.2, step=0.01,
-    help="The minimum percent difference between our new spending and our prior spending, before we make a change. "
+    help="The minimum percent difference between our new spending and our prior spending, before we make a change.\n\n"
          "Even if we hit a guardrail, we may elect to set this to 5% to avoid making lots of small adjustments. Set it "
-         "to 0% to disable it and allow all guardrail hits to trigger spending adjustments."
+         "to 0% to disable it and allow all guardrail hits to trigger spending adjustments.\n\nSetting this higher is "
+         "neither aggressive nor conservative, since it impacts spending increases as well as decreases. It is purely "
+         "a question of whether frequent adjustments are acceptable and administratively feasible for the client."
 )
 
 # Build current simulation parameters dict for change detection
