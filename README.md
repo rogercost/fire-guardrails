@@ -9,6 +9,10 @@ only increase our chances of success, but spend more while doing it.
 
 **All dollar amounts shown are in real dollars, net of inflation.**
 
+## Disclaimer
+
+This app is meant for theoretical experimentation purposes only. It is not financial advice and should not be used to provide financial advice. For guidance suitable for your own unique situation, needs and goals, please consult a fiduciary financial advisor.
+
 ## Background Information
 
 * This [Kitces blog post](https://www.kitces.com/blog/risk-based-monte-carlo-probability-of-success-guardrails-retirement-distribution-hatchet/) lays out the conceptual framework. (It uses a Monte Carlo approach, where ours is a historical simulation.)
