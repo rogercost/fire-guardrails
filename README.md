@@ -2,6 +2,8 @@
 
 This repository contains an implementation of a novel guardrails-based dynamic portfolio withdrawal strategy.
 
+The app can be found here: https://fire-guardrails.streamlit.app/
+
 The premise is that by by adjusting spending in response to market conditions as we move through retirement, we can not 
 only increase our chances of success, but spend more while doing it.
 
