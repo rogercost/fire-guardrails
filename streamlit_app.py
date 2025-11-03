@@ -282,6 +282,14 @@ adjustment_threshold = st.sidebar.slider(
     disabled=is_guidance  # In Guidance Mode, single-run snapshot ignores threshold
 )
 
+adjustment_frequency = st.sidebar.selectbox(
+    "Adjustment Frequency",
+    options=["Monthly", "Quarterly", "Biannually", "Annually"],
+    index=0,
+    help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
+         "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January)."
+)
+
 # Build current simulation parameters dict for change detection
 sim_params = {
     'start_date': pd.to_datetime(start_date),
@@ -295,6 +303,7 @@ sim_params = {
     'upper_adjustment_fraction': float(upper_adjustment_fraction),
     'lower_adjustment_fraction': float(lower_adjustment_fraction),
     'adjustment_threshold': float(adjustment_threshold),
+    'adjustment_frequency': adjustment_frequency,
 }
 last_run_params = st.session_state.get('last_run_params')
 dirty = last_run_params is not None and last_run_params != sim_params
@@ -365,6 +374,7 @@ if is_guidance:
             lower_guardrail_success=lower_guardrail_success,
             upper_adjustment_fraction=upper_adjustment_fraction,
             lower_adjustment_fraction=lower_adjustment_fraction,
+            adjustment_frequency=adjustment_frequency,
             verbose=False
         )
 
@@ -390,9 +400,24 @@ if is_guidance:
         low_adj_month = snap.get("lower_adjusted_monthly")
         low_adj_year = (low_adj_month * 12.0) if low_adj_month is not None else None
 
+        adjustments_allowed = snap.get("adjustments_allowed", True)
+        next_adjustment_date = snap.get("next_adjustment_date")
+
+        def fmt_month(ts):
+            if ts is None or pd.isna(ts):
+                return "N/A"
+            timestamp = pd.to_datetime(ts)
+            return timestamp.strftime("%B %Y")
+
         st.subheader("Guidance Mode")
         st.markdown("Use this mode to generate forward-looking guidance for a client who is retired today and in drawdown.\n\n"
                     "For more information, see the [official documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
+
+        if not adjustments_allowed:
+            st.info(
+                "Adjustments are restricted to the selected cadence. "
+                f"The next eligible adjustment month is {fmt_month(next_adjustment_date)}."
+            )
 
         st.markdown(
             f"* **Target Withdrawal Rate:** {start_wr*100:.2f}% ({fmt_money(start_month)}/month or {fmt_money(start_year)}/year "
@@ -400,14 +425,22 @@ if is_guidance:
             if start_wr is not None else
             "**Starting Withdrawal Rate:** N/A"
         )
-        st.markdown(
-            f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Current Monthly Spending\n  * If client's portfolio value exceeds this, adjust "
-            f"spending by {fmt_pct(up_adj_pct)} to {fmt_money(up_adj_month)}/month or {fmt_money(up_adj_year)}/year"
-        )
-        st.markdown(
-            f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Current Monthly Spending\n  * If client's portfolio value falls below this, adjust "
-            f"spending by {fmt_pct(low_adj_pct)} to {fmt_money(low_adj_month)}/month or {fmt_money(low_adj_year)}/year"
-        )
+        if adjustments_allowed:
+            st.markdown(
+                f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Current Monthly Spending\n  * If client's portfolio value exceeds this, adjust "
+                f"spending by {fmt_pct(up_adj_pct)} to {fmt_money(up_adj_month)}/month or {fmt_money(up_adj_year)}/year"
+            )
+            st.markdown(
+                f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Current Monthly Spending\n  * If client's portfolio value falls below this, adjust "
+                f"spending by {fmt_pct(low_adj_pct)} to {fmt_money(low_adj_month)}/month or {fmt_money(low_adj_year)}/year"
+            )
+        else:
+            st.markdown(
+                f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Current Monthly Spending."
+            )
+            st.markdown(
+                f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Current Monthly Spending."
+            )
 
     except Exception as e:
         st.error(f"Unable to compute guidance snapshot: {e}")
@@ -457,6 +490,7 @@ elif st.sidebar.button(
         upper_adjustment_fraction=upper_adjustment_fraction,
         lower_adjustment_fraction=lower_adjustment_fraction,
         adjustment_threshold=adjustment_threshold,
+        adjustment_frequency=adjustment_frequency,
         verbose=True,
         on_progress=on_progress,
         on_status=on_status
