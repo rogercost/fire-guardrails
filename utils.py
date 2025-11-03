@@ -356,6 +356,8 @@ def get_guardrail_withdrawals(df, start_date, end_date,
             return True
         if adjustment_frequency == "Quarterly":
             return ((month - 1) % 3) == 0
+        if adjustment_frequency == "Biannually":
+            return month in (1, 7)
         if adjustment_frequency == "Annually":
             return month == 1
         # Fallback to monthly behaviour for unexpected values
@@ -545,6 +547,8 @@ def compute_guardrail_guidance_snapshot(
             return list(range(1, 13))
         if adjustment_frequency == "Quarterly":
             return [1, 4, 7, 10]
+        if adjustment_frequency == "Biannually":
+            return [1, 7]
         if adjustment_frequency == "Annually":
             return [1]
         return list(range(1, 13))

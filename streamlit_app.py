@@ -284,10 +284,10 @@ adjustment_threshold = st.sidebar.slider(
 
 adjustment_frequency = st.sidebar.selectbox(
     "Adjustment Frequency",
-    options=["Monthly", "Quarterly", "Annually"],
+    options=["Monthly", "Quarterly", "Biannually", "Annually"],
     index=0,
-    help="How often spending adjustments are permitted. Choosing Quarterly or Annually restricts guardrail checks "
-         "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct or January)."
+    help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
+         "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January)."
 )
 
 # Build current simulation parameters dict for change detection
