@@ -77,19 +77,6 @@ stock_pct = st.sidebar.slider(
     help="Fraction of the portfolio allocated to US stocks; remainder to 10Y treasuries."
 )
 
-SIDEBAR_BASE_WIDTH_REM = 31.5
-st.markdown(
-    f"""
-    <style>
-    section[data-testid="stSidebar"] {{
-        width: {SIDEBAR_BASE_WIDTH_REM}rem !important;
-        min-width: {SIDEBAR_BASE_WIDTH_REM}rem !important;
-    }}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
 with st.sidebar.expander("Advanced Controls"):
     analysis_start_date = st.date_input(
         "Historical Analysis Start Date",
