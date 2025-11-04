@@ -30,10 +30,28 @@ if "spending_cap_option" not in st.session_state:
     st.session_state["spending_cap_option"] = "Unlimited"
 if "spending_floor_option" not in st.session_state:
     st.session_state["spending_floor_option"] = "Unlimited"
+if "analysis_start_date" not in st.session_state:
+    st.session_state["analysis_start_date"] = datetime.date(1871, 1, 1)
+if "upper_adjustment_fraction" not in st.session_state:
+    st.session_state["upper_adjustment_fraction"] = 1.0
+if "lower_adjustment_fraction" not in st.session_state:
+    st.session_state["lower_adjustment_fraction"] = 0.1
+if "adjustment_threshold" not in st.session_state:
+    st.session_state["adjustment_threshold"] = 0.0 if is_guidance else 0.05
+if "adjustment_frequency" not in st.session_state:
+    st.session_state["adjustment_frequency"] = "Monthly"
 
 
 # Sidebar for inputs
 st.sidebar.header("Simulation Parameters")
+
+analysis_start_date = st.session_state["analysis_start_date"]
+upper_adjustment_fraction = float(st.session_state["upper_adjustment_fraction"])
+lower_adjustment_fraction = float(st.session_state["lower_adjustment_fraction"])
+adjustment_threshold = float(st.session_state["adjustment_threshold"])
+adjustment_frequency = st.session_state["adjustment_frequency"]
+spending_cap_option = st.session_state["spending_cap_option"]
+spending_floor_option = st.session_state["spending_floor_option"]
 
 # Date Inputs
 today_date = datetime.date.today()
@@ -319,6 +337,94 @@ lower_guardrail_success = st.sidebar.slider(
     key="lower_guardrail_success"
 )
 
+cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 201, 5)]
+floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 24, -5)]
+adjustment_frequency_options = ["Monthly", "Quarterly", "Biannually", "Annually"]
+default_frequency = adjustment_frequency if adjustment_frequency in adjustment_frequency_options else "Monthly"
+default_frequency_index = adjustment_frequency_options.index(default_frequency)
+default_cap = spending_cap_option if spending_cap_option in cap_options else "Unlimited"
+default_floor = spending_floor_option if spending_floor_option in floor_options else "Unlimited"
+
+with st.sidebar.expander("Advanced Controls"):
+    analysis_start_date = st.date_input(
+        "Historical Analysis Start Date",
+        value=analysis_start_date,
+        min_value=datetime.date(1871, 1, 1),
+        max_value=datetime.date.today(),
+        help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nNote that when running historical "
+             "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
+             "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!",
+        key="analysis_start_date"
+    )
+
+    upper_adjustment_fraction = st.slider(
+        "Upper Adjustment Fraction", value=upper_adjustment_fraction, min_value=0.0, max_value=1.0, step=0.05,
+        help="How much to increase spending when we hit the upper guardrail.\n\nExpressed as a % of the distance between "
+             "the Upper Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the upper guardrail "
+             "represents 100% success and the target is 90%, setting this value to 50% means we go half the distance back "
+             "to the target, and our new withdrawal rate will be based on a 95% chance of success.\n\nSetting this higher "
+             "is more aggressive, and will cause you to make larger spending increases when you hit the upper guardrail.",
+        key="upper_adjustment_fraction"
+    )
+    lower_adjustment_fraction = st.slider(
+        "Lower Adjustment Fraction", value=lower_adjustment_fraction, min_value=0.0, max_value=1.0, step=0.05,
+        help="How much to decrease spending when we hit the lower guardrail.\n\nExpressed as a % of the distance between "
+             "the Lower Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the lower guardrail "
+             "represents 70% success and the target is 90%, setting this value to 50% means we go half the distance back "
+             "to the target, and our new withdrawal rate will be based on an 80% chance of success.\n\nSetting this higher "
+             "is more conservative, and will cause you to make larger spending decreases when you hit the lower guardrail.",
+        key="lower_adjustment_fraction"
+    )
+
+    adjustment_threshold = st.slider(
+        "Adjustment Threshold (e.g., 0.05 for 5%)",
+        value=adjustment_threshold,
+        min_value=0.0, max_value=0.2, step=0.01,
+        help="The minimum percent difference between our new spending and our prior spending, before we make a change.\n\n"
+             "Even if we hit a guardrail, we may elect to set this to 5% to avoid making lots of small adjustments. Set it "
+             "to 0% to disable it and allow all guardrail hits to trigger spending adjustments.\n\nSetting this higher is "
+             "neither aggressive nor conservative, since it impacts spending increases as well as decreases. It is purely "
+             "a question of whether frequent adjustments are acceptable and administratively feasible for the client.\n\n"
+             "Not used in Guidance Mode, which will always show spending adjustment suggestions, no matter how small.",
+        disabled=is_guidance,  # In Guidance Mode, single-run snapshot ignores threshold
+        key="adjustment_threshold"
+    )
+
+    st.selectbox(
+        "Adjustment Frequency",
+        options=adjustment_frequency_options,
+        index=default_frequency_index,
+        help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
+             "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January).",
+        disabled=is_guidance,
+        key="adjustment_frequency"
+    )
+
+    st.selectbox(
+        "Spending Cap",
+        options=cap_options,
+        index=cap_options.index(default_cap),
+        help="Maximum spending level as a percent of the initial monthly spending.",
+        disabled=is_guidance,
+        key="spending_cap_option"
+    )
+    st.selectbox(
+        "Spending Floor",
+        options=floor_options,
+        index=floor_options.index(default_floor),
+        help="Minimum spending level as a percent of the initial monthly spending.",
+        disabled=is_guidance,
+        key="spending_floor_option"
+    )
+
+analysis_start_date = st.session_state["analysis_start_date"]
+upper_adjustment_fraction = float(st.session_state["upper_adjustment_fraction"])
+lower_adjustment_fraction = float(st.session_state["lower_adjustment_fraction"])
+adjustment_threshold = float(st.session_state["adjustment_threshold"])
+adjustment_frequency = st.session_state["adjustment_frequency"]
+spending_cap_option = st.session_state["spending_cap_option"]
+spending_floor_option = st.session_state["spending_floor_option"]
+
 def _relative_option_to_multiplier(option: str):
     if option == "Unlimited":
         return None
@@ -328,8 +434,8 @@ def _relative_option_to_multiplier(option: str):
         return None
 
 
-spending_cap_multiplier = _relative_option_to_multiplier(st.session_state.get("spending_cap_option"))
-spending_floor_multiplier = _relative_option_to_multiplier(st.session_state.get("spending_floor_option"))
+spending_cap_multiplier = _relative_option_to_multiplier(spending_cap_option)
+spending_floor_multiplier = _relative_option_to_multiplier(spending_floor_option)
 
 # Build current simulation parameters dict for change detection
 sim_params = {
