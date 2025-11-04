@@ -54,16 +54,6 @@ retirement_duration_months = st.sidebar.number_input(
     step=12,
     help="Length of retirement in months.\n\nIn Guidance Mode, this should be the remaining number of months, if retirement is already underway."
 )
-analysis_start_date = st.sidebar.date_input(
-    "Historical Analysis Start Date",
-    value=datetime.date(1871, 1, 1),
-    min_value=datetime.date(1871, 1, 1),
-    max_value=datetime.date.today(),
-    help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nNote that when running historical "
-         "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
-         "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!"
-)
-
 # Numeric Inputs
 initial_value = st.sidebar.number_input(
     "Initial Portfolio Value",
@@ -86,6 +76,87 @@ stock_pct = st.sidebar.slider(
     "Stock Percentage", value=0.75, min_value=0.0, max_value=1.0, step=0.05,
     help="Fraction of the portfolio allocated to US stocks; remainder to 10Y treasuries."
 )
+
+SIDEBAR_BASE_WIDTH_REM = 31.5
+st.markdown(
+    f"""
+    <style>
+    section[data-testid="stSidebar"] {{
+        width: {SIDEBAR_BASE_WIDTH_REM}rem !important;
+        min-width: {SIDEBAR_BASE_WIDTH_REM}rem !important;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+with st.sidebar.expander("Advanced Controls"):
+    analysis_start_date = st.date_input(
+        "Historical Analysis Start Date",
+        value=datetime.date(1871, 1, 1),
+        min_value=datetime.date(1871, 1, 1),
+        max_value=datetime.date.today(),
+        help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nNote that when running historical "
+             "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
+             "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!"
+    )
+
+    upper_adjustment_fraction = st.slider(
+        "Upper Adjustment Fraction", value=1.0, min_value=0.0, max_value=1.0, step=0.05,
+        help="How much to increase spending when we hit the upper guardrail.\n\nExpressed as a % of the distance between "
+             "the Upper Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the upper guardrail "
+             "represents 100% success and the target is 90%, setting this value to 50% means we go half the distance back "
+             "to the target, and our new withdrawal rate will be based on a 95% chance of success.\n\nSetting this higher "
+             "is more aggressive, and will cause you to make larger spending increases when you hit the upper guardrail."
+    )
+    lower_adjustment_fraction = st.slider(
+        "Lower Adjustment Fraction", value=0.1, min_value=0.0, max_value=1.0, step=0.05,
+        help="How much to decrease spending when we hit the lower guardrail.\n\nExpressed as a % of the distance between "
+             "the Lower Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the lower guardrail "
+             "represents 70% success and the target is 90%, setting this value to 50% means we go half the distance back "
+             "to the target, and our new withdrawal rate will be based on an 80% chance of success.\n\nSetting this higher "
+             "is more conservative, and will cause you to make larger spending decreases when you hit the lower guardrail."
+    )
+
+    adjustment_threshold = st.slider(
+        "Adjustment Threshold (e.g., 0.05 for 5%)",
+        value=0.0 if is_guidance else 0.05,
+        min_value=0.0, max_value=0.2, step=0.01,
+        help="The minimum percent difference between our new spending and our prior spending, before we make a change.\n\n"
+             "Even if we hit a guardrail, we may elect to set this to 5% to avoid making lots of small adjustments. Set it "
+             "to 0% to disable it and allow all guardrail hits to trigger spending adjustments.\n\nSetting this higher is "
+             "neither aggressive nor conservative, since it impacts spending increases as well as decreases. It is purely "
+             "a question of whether frequent adjustments are acceptable and administratively feasible for the client.\n\n"
+             "Not used in Guidance Mode, which will always show spending adjustment suggestions, no matter how small.",
+        disabled=is_guidance  # In Guidance Mode, single-run snapshot ignores threshold
+    )
+
+    adjustment_frequency = st.selectbox(
+        "Adjustment Frequency",
+        options=["Monthly", "Quarterly", "Biannually", "Annually"],
+        index=0,
+        help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
+             "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January).",
+        disabled=is_guidance
+    )
+
+    cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 201, 5)]
+    floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 24, -5)]
+
+    st.selectbox(
+        "Spending Cap",
+        options=cap_options,
+        key="spending_cap_option",
+        help="Maximum spending level as a percent of the initial monthly spending.",
+        disabled=is_guidance
+    )
+    st.selectbox(
+        "Spending Floor",
+        options=floor_options,
+        key="spending_floor_option",
+        help="Minimum spending level as a percent of the initial monthly spending.",
+        disabled=is_guidance
+    )
 
 # Compute Retirement End Date for Simulation Mode from duration
 computed_end_date = (pd.to_datetime(start_date) + pd.DateOffset(months=int(retirement_duration_months) - 1)).date() if not is_guidance else None
@@ -167,7 +238,7 @@ try:
         'initial_value': float(initial_value),
         'stock_pct': float(stock_pct),
         'upper_sr': float(st.session_state.get("upper_guardrail_success", 1.00)),
-        'lower_sr': float(st.session_state.get("lower_guardrail_success", 0.75)),
+        'lower_sr': float(st.session_state.get("lower_guardrail_success", 0.25)),
         'iwr': float(st.session_state.get('iwr_value')) if st.session_state.get('iwr_value') is not None else None,
     }
 
@@ -252,7 +323,7 @@ upper_guardrail_success = st.sidebar.slider(
     key="upper_guardrail_success"
 )
 lower_guardrail_success = st.sidebar.slider(
-    lower_guardrail_label, value=st.session_state.get("lower_guardrail_success", 0.75), min_value=0.0, max_value=1.0, step=0.01,
+    lower_guardrail_label, value=st.session_state.get("lower_guardrail_success", 0.25), min_value=0.0, max_value=1.0, step=0.01,
     help="The withdrawal rate used to calculate the lower guardrail portfolio value.\n\nThis is the value where the "
          "current withdrawal amount, if held constant, will succeed this frequently or less, for all periods with "
          "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
@@ -260,64 +331,6 @@ lower_guardrail_success = st.sidebar.slider(
          "sooner when markets are down.",
     key="lower_guardrail_success"
 )
-upper_adjustment_fraction = st.sidebar.slider(
-    "Upper Adjustment Fraction", value=1.0, min_value=0.0, max_value=1.0, step=0.05,
-    help="How much to increase spending when we hit the upper guardrail.\n\nExpressed as a % of the distance between "
-         "the Upper Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the upper guardrail "
-         "represents 100% success and the target is 90%, setting this value to 50% means we go half the distance back "
-         "to the target, and our new withdrawal rate will be based on a 95% chance of success.\n\nSetting this higher "
-         "is more aggressive, and will cause you to make larger spending increases when you hit the upper guardrail."
-)
-lower_adjustment_fraction = st.sidebar.slider(
-    "Lower Adjustment Fraction", value=0.1, min_value=0.0, max_value=1.0, step=0.05,
-    help="How much to decrease spending when we hit the lower guardrail.\n\nExpressed as a % of the distance between "
-         "the Lower Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the lower guardrail "
-         "represents 70% success and the target is 90%, setting this value to 50% means we go half the distance back "
-         "to the target, and our new withdrawal rate will be based on an 80% chance of success.\n\nSetting this higher "
-         "is more conservative, and will cause you to make larger spending decreases when you hit the lower guardrail."
-)
-
-adjustment_threshold = st.sidebar.slider(
-    "Adjustment Threshold (e.g., 0.05 for 5%)",
-    value=0.0 if is_guidance else 0.05,
-    min_value=0.0, max_value=0.2, step=0.01,
-    help="The minimum percent difference between our new spending and our prior spending, before we make a change.\n\n"
-         "Even if we hit a guardrail, we may elect to set this to 5% to avoid making lots of small adjustments. Set it "
-         "to 0% to disable it and allow all guardrail hits to trigger spending adjustments.\n\nSetting this higher is "
-         "neither aggressive nor conservative, since it impacts spending increases as well as decreases. It is purely "
-         "a question of whether frequent adjustments are acceptable and administratively feasible for the client.\n\n"
-         "Not used in Guidance Mode, which will always show spending adjustment suggestions, no matter how small.",
-    disabled=is_guidance  # In Guidance Mode, single-run snapshot ignores threshold
-)
-
-adjustment_frequency = st.sidebar.selectbox(
-    "Adjustment Frequency",
-    options=["Monthly", "Quarterly", "Biannually", "Annually"],
-    index=0,
-    help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
-         "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January)."
-)
-
-cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(105, 251, 5)]
-floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(95, 24, -5)]
-
-with st.sidebar.expander("Advanced Controls"):
-    st.markdown(
-        "Configure optional limits that cap increases or decreases suggested by the guardrail strategy."
-    )
-    st.selectbox(
-        "Spending Cap",
-        options=cap_options,
-        key="spending_cap_option",
-        help="Maximum spending level as a percent of the initial monthly spending."
-    )
-    st.selectbox(
-        "Spending Floor",
-        options=floor_options,
-        key="spending_floor_option",
-        help="Minimum spending level as a percent of the initial monthly spending."
-    )
-
 
 def _relative_option_to_multiplier(option: str):
     if option == "Unlimited":
