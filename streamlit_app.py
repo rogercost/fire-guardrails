@@ -301,28 +301,22 @@ adjustment_frequency = st.sidebar.selectbox(
 cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(105, 251, 5)]
 floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(95, 24, -5)]
 
-if st.sidebar.button("Advanced...", use_container_width=True):
-    st.session_state["show_advanced_modal"] = True
-
-if st.session_state.get("show_advanced_modal", False):
-    with st.modal("Advanced Controls"):
-        st.markdown(
-            "Configure optional limits that cap increases or decreases suggested by the guardrail strategy."
-        )
-        st.selectbox(
-            "Spending Cap",
-            options=cap_options,
-            key="spending_cap_option",
-            help="Maximum spending level as a percent of the initial monthly spending."
-        )
-        st.selectbox(
-            "Spending Floor",
-            options=floor_options,
-            key="spending_floor_option",
-            help="Minimum spending level as a percent of the initial monthly spending."
-        )
-        if st.button("Close", key="close_advanced_modal"):
-            st.session_state["show_advanced_modal"] = False
+with st.sidebar.expander("Advanced Controls"):
+    st.markdown(
+        "Configure optional limits that cap increases or decreases suggested by the guardrail strategy."
+    )
+    st.selectbox(
+        "Spending Cap",
+        options=cap_options,
+        key="spending_cap_option",
+        help="Maximum spending level as a percent of the initial monthly spending."
+    )
+    st.selectbox(
+        "Spending Floor",
+        options=floor_options,
+        key="spending_floor_option",
+        help="Minimum spending level as a percent of the initial monthly spending."
+    )
 
 
 def _relative_option_to_multiplier(option: str):
