@@ -371,6 +371,168 @@ def render_dirty_banner():
         unsafe_allow_html=True
     )
 
+
+def render_simulation_results(results_df: pd.DataFrame) -> None:
+    """Render charts and summaries for simulation results."""
+    st.subheader("Simulation Mode")
+
+    if results_df is None or results_df.empty:
+        st.info("No simulation results to display.")
+        return
+
+    st.subheader("Portfolio Value vs Guardrails")
+
+    show_guardrail_hits = st.checkbox(
+        "Show guardrail hit markers",
+        value=True,
+        help="Toggle vertical dotted lines at guardrail hits.",
+        key="show_guardrail_hits"
+    )
+
+    fig1 = go.Figure()
+    if 'Fixed_WR_Value' in results_df.columns:
+        fig1.add_trace(go.Scatter(
+            x=results_df['Date'], y=results_df['Fixed_WR_Value'],
+            mode='lines', name='Value w/Fixed WR', line=dict(color='#7f7f7f'),
+            opacity=0.6,
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+        ))
+
+    fig1.add_trace(go.Scatter(
+        x=results_df['Date'], y=results_df['Upper_Guardrail'],
+        mode='lines', name='Upper Guardrail', line=dict(color='#2ca02c'), opacity=0.45,
+        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+    ))
+    fig1.add_trace(go.Scatter(
+        x=results_df['Date'], y=results_df['Lower_Guardrail'],
+        mode='lines', name='Lower Guardrail', line=dict(color='#d62728'), opacity=0.45,
+        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+    ))
+    fig1.add_trace(go.Scatter(
+        x=results_df['Date'], y=results_df['Portfolio_Value'],
+        mode='lines', name='Portfolio Value', line=dict(color='#1f77b4'),
+        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+    ))
+
+    shapes = []
+    if show_guardrail_hits:
+        for d in results_df.loc[results_df['Guardrail_Hit'] == 'UPPER', 'Date']:
+            shapes.append(dict(
+                type='line', xref='x', yref='paper',
+                x0=d, x1=d, y0=0, y1=1,
+                line=dict(color='#2ca02c', width=1, dash='dot'),
+                layer='below'
+            ))
+        for d in results_df.loc[results_df['Guardrail_Hit'] == 'LOWER', 'Date']:
+            shapes.append(dict(
+                type='line', xref='x', yref='paper',
+                x0=d, x1=d, y0=0, y1=1,
+                line=dict(color='#d62728', width=1, dash='dot'),
+                layer='below'
+            ))
+
+    fig1.update_layout(
+        shapes=shapes,
+        hovermode='x unified',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0, traceorder='reversed'),
+        margin=dict(l=10, r=10, t=10, b=10),
+        dragmode='zoom',
+        xaxis=dict(
+            title='Date',
+            type='date',
+            rangeslider=dict(visible=True),
+            hoverformat='%b %d, %Y'
+        ),
+        yaxis=dict(
+            title='Value ($)',
+            tickprefix='$',
+            tickformat=',.0f',
+            automargin=True,
+            rangemode='tozero'
+        )
+    )
+    st.plotly_chart(fig1, use_container_width=True, config={'scrollZoom': False})
+
+    st.subheader("Withdrawals Over Time")
+
+    init_withdrawal = float(results_df['Withdrawal'].iloc[0]) if not results_df.empty else 0.0
+
+    fig2 = go.Figure()
+    fig2.add_trace(go.Scatter(
+        x=results_df['Date'], y=results_df['Withdrawal'],
+        mode='lines', name='Withdrawal', line=dict(color='#9467bd'),
+        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+    ))
+    fig2.add_trace(go.Scatter(
+        x=results_df['Date'],
+        y=results_df['Fixed_WR_Withdrawal'] if 'Fixed_WR_Withdrawal' in results_df.columns else [init_withdrawal] * len(results_df),
+        mode='lines',
+        name='Initial Withdrawal',
+        line=dict(color='#7f7f7f', dash='dash'),
+        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+    ))
+    fig2.update_layout(
+        hovermode='x unified',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+        margin=dict(l=10, r=10, t=10, b=10),
+        dragmode='zoom',
+        xaxis=dict(
+            title='Date',
+            type='date',
+            rangeslider=dict(visible=True),
+            hoverformat='%b %d, %Y'
+        ),
+        yaxis=dict(
+            title='Withdrawal ($/month)',
+            tickprefix='$',
+            tickformat=',.0f',
+            automargin=True,
+            rangemode='tozero'
+        )
+    )
+    st.plotly_chart(fig2, use_container_width=True, config={'scrollZoom': False})
+
+    total_fixed = float(results_df['Fixed_WR_Withdrawal'].sum()) if 'Fixed_WR_Withdrawal' in results_df.columns else float(init_withdrawal) * len(results_df)
+    total_guardrails = float(results_df['Withdrawal'].sum())
+    diff_ratio = (total_guardrails - total_fixed) / total_fixed if total_fixed else 0.0
+
+    withdrawals = results_df['Withdrawal'].astype(float) if 'Withdrawal' in results_df else pd.Series(dtype=float)
+    min_withdrawal = float(withdrawals.min()) if not withdrawals.empty else 0.0
+    max_withdrawal = float(withdrawals.max()) if not withdrawals.empty else 0.0
+
+    def _longest_run(values, target):
+        longest = 0
+        current = 0
+        for val in values:
+            if np.isclose(val, target, rtol=1e-9, atol=0.5):
+                current += 1
+                longest = max(longest, current)
+            else:
+                current = 0
+        return longest
+
+    min_streak = _longest_run(withdrawals, min_withdrawal) if not withdrawals.empty else 0
+    max_streak = _longest_run(withdrawals, max_withdrawal) if not withdrawals.empty else 0
+
+    def _fmt_change(new_value):
+        if init_withdrawal == 0:
+            return "N/A"
+        return f"{(new_value / init_withdrawal - 1.0):+.0%}"
+
+    def _fmt_months(months):
+        return f"{months} month{'s' if months != 1 else ''}"
+
+    st.markdown(f"Total Withdrawal (Fixed): ${total_fixed:,.0f}")
+    st.markdown(f"Total Withdrawal (Using Guardrails): ${total_guardrails:,.0f}")
+    st.markdown(f"Difference: {diff_ratio:+.0%}")
+    st.markdown(
+        f"Min Withdrawal: ${min_withdrawal:,.0f} ({_fmt_change(min_withdrawal)}) for {_fmt_months(min_streak)}"
+    )
+    st.markdown(
+        f"Max Withdrawal: ${max_withdrawal:,.0f} ({_fmt_change(max_withdrawal)}) for {_fmt_months(max_streak)}"
+    )
+
+
 # When inputs change, visually dim and surround the main area with a red border
 if dirty and not is_guidance:
     st.markdown(
@@ -551,130 +713,7 @@ elif st.sidebar.button(
     # Remove status line entirely to place plots at the very top
     status_ph.empty()
 
-    st.subheader("Simulation Mode")
-
-    # Charts (table removed)
-    st.subheader("Portfolio Value vs Guardrails")
-
-    show_guardrail_hits = st.checkbox(
-        "Show guardrail hit markers",
-        value=True,
-        help="Toggle vertical dotted lines at guardrail hits.",
-        key="show_guardrail_hits"
-    )
-
-    fig1 = go.Figure()
-    # Add fixed-withdrawal portfolio value first so it renders behind others
-    if 'Fixed_WR_Value' in results_df.columns:
-        fig1.add_trace(go.Scatter(
-            x=results_df['Date'], y=results_df['Fixed_WR_Value'],
-            mode='lines', name='Value w/Fixed WR', line=dict(color='#7f7f7f'),
-            opacity=0.6,
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-        ))
-    # Draw guardrails first (muted) so portfolio is visually on top
-    fig1.add_trace(go.Scatter(
-        x=results_df['Date'], y=results_df['Upper_Guardrail'],
-        mode='lines', name='Upper Guardrail', line=dict(color='#2ca02c'), opacity=0.45,
-        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-    ))
-    fig1.add_trace(go.Scatter(
-        x=results_df['Date'], y=results_df['Lower_Guardrail'],
-        mode='lines', name='Lower Guardrail', line=dict(color='#d62728'), opacity=0.45,
-        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-    ))
-    fig1.add_trace(go.Scatter(
-        x=results_df['Date'], y=results_df['Portfolio_Value'],
-        mode='lines', name='Portfolio Value', line=dict(color='#1f77b4'),
-        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-    ))
-    # Add thin vertical dotted lines at guardrail hits (drawn behind data)
-    shapes = []
-    if show_guardrail_hits:
-        for d in results_df.loc[results_df['Guardrail_Hit'] == 'UPPER', 'Date']:
-            shapes.append(dict(
-                type='line', xref='x', yref='paper',
-                x0=d, x1=d, y0=0, y1=1,
-                line=dict(color='#2ca02c', width=1, dash='dot'),
-                layer='below'
-            ))
-        for d in results_df.loc[results_df['Guardrail_Hit'] == 'LOWER', 'Date']:
-            shapes.append(dict(
-                type='line', xref='x', yref='paper',
-                x0=d, x1=d, y0=0, y1=1,
-                line=dict(color='#d62728', width=1, dash='dot'),
-                layer='below'
-            ))
-
-    fig1.update_layout(
-        shapes=shapes,
-        hovermode='x unified',
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0, traceorder='reversed'),
-        margin=dict(l=10, r=10, t=10, b=10),
-        dragmode='zoom',
-        xaxis=dict(
-            title='Date',
-            type='date',
-            rangeslider=dict(visible=True),
-            hoverformat='%b %d, %Y'
-        ),
-        yaxis=dict(
-            title='Value ($)',
-            tickprefix='$',
-            tickformat=',.0f',
-            automargin=True,
-            rangemode='tozero'
-        )
-    )
-    st.plotly_chart(fig1, use_container_width=True, config={'scrollZoom': False})
-
-    st.subheader("Withdrawals Over Time")
-
-    init_withdrawal = float(results_df['Withdrawal'].iloc[0])
-
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(
-        x=results_df['Date'], y=results_df['Withdrawal'],
-        mode='lines', name='Withdrawal', line=dict(color='#9467bd'),
-        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-    ))
-    fig2.add_trace(go.Scatter(
-        x=results_df['Date'],
-        y=results_df['Fixed_WR_Withdrawal'] if 'Fixed_WR_Withdrawal' in results_df.columns else [init_withdrawal] * len(results_df),
-        mode='lines',
-        name='Initial Withdrawal',
-        line=dict(color='#7f7f7f', dash='dash'),
-        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-    ))
-    fig2.update_layout(
-        hovermode='x unified',
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-        margin=dict(l=10, r=10, t=10, b=10),
-        dragmode='zoom',
-        xaxis=dict(
-            title='Date',
-            type='date',
-            rangeslider=dict(visible=True),
-            hoverformat='%b %d, %Y'
-        ),
-        yaxis=dict(
-            title='Withdrawal ($/month)',
-            tickprefix='$',
-            tickformat=',.0f',
-            automargin=True,
-            rangemode='tozero'
-        )
-    )
-    st.plotly_chart(fig2, use_container_width=True, config={'scrollZoom': False})
-
-    # Totals summary under the withdrawals chart
-    total_fixed = float(results_df['Fixed_WR_Withdrawal'].sum()) if 'Fixed_WR_Withdrawal' in results_df.columns else float(init_withdrawal) * len(results_df)
-    total_guardrails = float(results_df['Withdrawal'].sum())
-    diff_ratio = (total_guardrails - total_fixed) / total_fixed if total_fixed else 0.0
-
-    st.markdown(f"Total Withdrawal (Fixed): ${total_fixed:,.0f}")
-    st.markdown(f"Total Withdrawal (Using Guardrails): ${total_guardrails:,.0f}")
-    st.markdown(f"Difference: {diff_ratio:+.0%}")
+    render_simulation_results(results_df)
 
 elif not is_guidance:
     if 'results_df' in st.session_state:
@@ -683,160 +722,7 @@ elif not is_guidance:
         if st.session_state.get('dirty'):
             render_dirty_banner()
 
-        st.subheader("Simulation Mode")
-        st.subheader("Portfolio Value vs Guardrails")
-
-        show_guardrail_hits = st.checkbox(
-            "Show guardrail hit markers",
-            value=True,
-            help="Toggle vertical dotted lines at guardrail hits.",
-            key="show_guardrail_hits"
-        )
-
-        fig1 = go.Figure()
-        # Add fixed-withdrawal portfolio value first so it renders behind others
-        if 'Fixed_WR_Value' in results_df.columns:
-            fig1.add_trace(go.Scatter(
-                x=results_df['Date'], y=results_df['Fixed_WR_Value'],
-                mode='lines', name='Value w/Fixed WR', line=dict(color='#7f7f7f'),
-                opacity=0.6,
-                hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-            ))
-        # Draw guardrails first (muted) so portfolio is visually on top
-        fig1.add_trace(go.Scatter(
-            x=results_df['Date'], y=results_df['Upper_Guardrail'],
-            mode='lines', name='Upper Guardrail', line=dict(color='#2ca02c'), opacity=0.45,
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-        ))
-        fig1.add_trace(go.Scatter(
-            x=results_df['Date'], y=results_df['Lower_Guardrail'],
-            mode='lines', name='Lower Guardrail', line=dict(color='#d62728'), opacity=0.45,
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-        ))
-        fig1.add_trace(go.Scatter(
-            x=results_df['Date'], y=results_df['Portfolio_Value'],
-            mode='lines', name='Portfolio Value', line=dict(color='#1f77b4'),
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-        ))
-        # Add thin vertical dotted lines at guardrail hits (drawn behind data)
-        shapes = []
-        if show_guardrail_hits:
-            for d in results_df.loc[results_df['Guardrail_Hit'] == 'UPPER', 'Date']:
-                shapes.append(dict(
-                    type='line', xref='x', yref='paper',
-                    x0=d, x1=d, y0=0, y1=1,
-                    line=dict(color='#2ca02c', width=1, dash='dot'),
-                    layer='below'
-                ))
-            for d in results_df.loc[results_df['Guardrail_Hit'] == 'LOWER', 'Date']:
-                shapes.append(dict(
-                    type='line', xref='x', yref='paper',
-                    x0=d, x1=d, y0=0, y1=1,
-                    line=dict(color='#d62728', width=1, dash='dot'),
-                    layer='below'
-                ))
-
-        fig1.update_layout(
-            shapes=shapes,
-            hovermode='x unified',
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0, traceorder='reversed'),
-            margin=dict(l=10, r=10, t=10, b=10),
-            dragmode='zoom',
-            xaxis=dict(
-                title='Date',
-                type='date',
-                rangeslider=dict(visible=True),
-                hoverformat='%b %d, %Y'
-            ),
-            yaxis=dict(
-                title='Value ($)',
-                tickprefix='$',
-                tickformat=',.0f',
-                automargin=True,
-                rangemode='tozero'
-            )
-        )
-        st.plotly_chart(fig1, use_container_width=True, config={'scrollZoom': False})
-
-        st.subheader("Withdrawals Over Time")
-
-        init_withdrawal = float(results_df['Withdrawal'].iloc[0])
-
-        fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(
-            x=results_df['Date'], y=results_df['Withdrawal'],
-            mode='lines', name='Withdrawal', line=dict(color='#9467bd'),
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-        ))
-        fig2.add_trace(go.Scatter(
-            x=results_df['Date'],
-            y=results_df['Fixed_WR_Withdrawal'] if 'Fixed_WR_Withdrawal' in results_df.columns else [init_withdrawal] * len(results_df),
-            mode='lines',
-            name='Initial Withdrawal',
-            line=dict(color='#7f7f7f', dash='dash'),
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-        ))
-        fig2.update_layout(
-            hovermode='x unified',
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-            margin=dict(l=10, r=10, t=10, b=10),
-            dragmode='zoom',
-            xaxis=dict(
-                title='Date',
-                type='date',
-                rangeslider=dict(visible=True),
-                hoverformat='%b %d, %Y'
-            ),
-            yaxis=dict(
-                title='Withdrawal ($/month)',
-                tickprefix='$',
-                tickformat=',.0f',
-                automargin=True,
-                rangemode='tozero'
-            )
-        )
-        st.plotly_chart(fig2, use_container_width=True, config={'scrollZoom': False})
-
-        # Totals summary under the withdrawals chart
-        total_fixed = float(results_df['Fixed_WR_Withdrawal'].sum()) if 'Fixed_WR_Withdrawal' in results_df.columns else float(init_withdrawal) * len(results_df)
-        total_guardrails = float(results_df['Withdrawal'].sum())
-        diff_ratio = (total_guardrails - total_fixed) / total_fixed if total_fixed else 0.0
-
-        withdrawals = results_df['Withdrawal'].astype(float)
-        min_withdrawal = float(withdrawals.min()) if not withdrawals.empty else 0.0
-        max_withdrawal = float(withdrawals.max()) if not withdrawals.empty else 0.0
-
-        def _longest_run(values, target):
-            longest = 0
-            current = 0
-            for val in values:
-                if np.isclose(val, target, rtol=1e-9, atol=0.5):
-                    current += 1
-                    longest = max(longest, current)
-                else:
-                    current = 0
-            return longest
-
-        min_streak = _longest_run(withdrawals, min_withdrawal)
-        max_streak = _longest_run(withdrawals, max_withdrawal)
-
-        def _fmt_change(new_value):
-            if init_withdrawal == 0:
-                return "N/A"
-            return f"{(new_value / init_withdrawal - 1.0):+.0%}"
-
-        def _fmt_months(months):
-            return f"{months} month{'s' if months != 1 else ''}"
-
-        st.markdown(f"Total Withdrawal (Fixed): ${total_fixed:,.0f}")
-        st.markdown(f"Total Withdrawal (Using Guardrails): ${total_guardrails:,.0f}")
-        st.markdown(f"Difference: {diff_ratio:+.0%}")
-        st.markdown(
-            f"Min Withdrawal: ${min_withdrawal:,.0f} ({_fmt_change(min_withdrawal)}) for {_fmt_months(min_streak)}"
-        )
-        st.markdown(
-            f"Max Withdrawal: ${max_withdrawal:,.0f} ({_fmt_change(max_withdrawal)}) for {_fmt_months(max_streak)}"
-        )
+        render_simulation_results(results_df)
     else:
         st.subheader("Simulation Mode")
         st.markdown("Use this mode to simulate running a guardrail-based retirement withdrawal strategy during a historical period.\n\n"
