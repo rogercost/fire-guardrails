@@ -285,6 +285,8 @@ def get_guardrail_withdrawals(df, start_date, end_date,
                               lower_adjustment_fraction=0.1,
                               adjustment_threshold=0.05,
                               adjustment_frequency="Monthly",
+                              spending_cap=None,
+                              spending_floor=None,
                               verbose=False,
                               on_progress=None,
                               on_status=None):
@@ -296,6 +298,7 @@ def get_guardrail_withdrawals(df, start_date, end_date,
     2. Calculate portfolio values that would make current spending have upper/lower success rates
     3. If portfolio hits guardrails, adjust spending
     4. Only implement adjustment if it exceeds threshold (to avoid constant small changes)
+    5. Optionally cap or floor the resulting spending relative to the initial monthly amount
 
     Returns
     -------
@@ -342,6 +345,14 @@ def get_guardrail_withdrawals(df, start_date, end_date,
     # State variables
     current_portfolio_value = initial_value
     previous_monthly_spending = initial_value * initial_wr / 12
+    cap_amount = (
+        previous_monthly_spending * float(spending_cap)
+        if spending_cap is not None else None
+    )
+    floor_amount = (
+        previous_monthly_spending * float(spending_floor)
+        if spending_floor is not None else None
+    )
 
     # Fixed-withdrawal shadow path initialization
     fixed_monthly_spending = previous_monthly_spending
@@ -430,11 +441,20 @@ def get_guardrail_withdrawals(df, start_date, end_date,
 
                 # Step 6: Only adjust if the new dollar amount differs from the previous dollar amount by more than the configured threshold.
                 #
-                percent_change = abs(new_proposed_spending - previous_monthly_spending) / previous_monthly_spending if previous_monthly_spending else 0.0
+                bounded_spending = new_proposed_spending
+                if cap_amount is not None:
+                    bounded_spending = min(bounded_spending, cap_amount)
+                if floor_amount is not None:
+                    bounded_spending = max(bounded_spending, floor_amount)
+
+                percent_change = (
+                    abs(bounded_spending - previous_monthly_spending) / previous_monthly_spending
+                    if previous_monthly_spending else 0.0
+                )
 
                 if percent_change > adjustment_threshold:
                     # Make the adjustment
-                    actual_monthly_spending = new_proposed_spending
+                    actual_monthly_spending = bounded_spending
                     adjustment_made = True
                 else:
                     # Keep previous spending (inflation adjusted)
@@ -515,6 +535,8 @@ def compute_guardrail_guidance_snapshot(
     upper_adjustment_fraction=1.0,
     lower_adjustment_fraction=0.1,
     adjustment_frequency="Monthly",
+    spending_cap=None,
+    spending_floor=None,
     verbose=False,
 ):
     """
@@ -605,6 +627,16 @@ def compute_guardrail_guidance_snapshot(
 
     # Base first-month spending using the target WR (matches label logic)
     base_monthly_spending = (float(current_portfolio_value) * target_wr / 12.0) if target_wr is not None else None
+    cap_amount = (
+        float(base_monthly_spending) * float(spending_cap)
+        if base_monthly_spending is not None and spending_cap is not None
+        else None
+    )
+    floor_amount = (
+        float(base_monthly_spending) * float(spending_floor)
+        if base_monthly_spending is not None and spending_floor is not None
+        else None
+    )
 
     # Guardrail PVs where CURRENT spending equals the WR for upper/lower SRs (matches simulation logic)
     use_spending = float(current_monthly_spending) if current_monthly_spending is not None else None
@@ -627,7 +659,8 @@ def compute_guardrail_guidance_snapshot(
     adj_lower_wr = _wr(desired_lower_sr)
 
     # At a guardrail hit, the simulation computes the new spending using the portfolio value at the hit.
-    # Mirror that here by using the guardrail PVs rather than today's PV for the hypothetical adjustments.
+    # Mirror that here by using the guardrail PVs rather than today's PV for the hypothetical adjustments
+    # and apply the same cap/floor bounds that the simulation enforces.
     adj_upper_monthly = (
         float(upper_guardrail_value) * adj_upper_wr / 12.0
         if (adj_upper_wr is not None and np.isfinite(upper_guardrail_value))
@@ -638,6 +671,19 @@ def compute_guardrail_guidance_snapshot(
         if (adj_lower_wr is not None and np.isfinite(lower_guardrail_value))
         else None
     )
+
+    def _apply_bounds(value):
+        if value is None:
+            return None
+        bounded = float(value)
+        if cap_amount is not None:
+            bounded = min(bounded, cap_amount)
+        if floor_amount is not None:
+            bounded = max(bounded, floor_amount)
+        return bounded
+
+    adj_upper_monthly = _apply_bounds(adj_upper_monthly)
+    adj_lower_monthly = _apply_bounds(adj_lower_monthly)
 
     if not adjustments_allowed:
         adj_upper_monthly = None

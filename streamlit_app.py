@@ -24,6 +24,14 @@ title_ph = st.empty()
 desc_ph = st.empty()
 
 
+if "show_advanced_modal" not in st.session_state:
+    st.session_state["show_advanced_modal"] = False
+if "spending_cap_option" not in st.session_state:
+    st.session_state["spending_cap_option"] = "Unlimited"
+if "spending_floor_option" not in st.session_state:
+    st.session_state["spending_floor_option"] = "Unlimited"
+
+
 # Sidebar for inputs
 st.sidebar.header("Simulation Parameters")
 
@@ -290,6 +298,45 @@ adjustment_frequency = st.sidebar.selectbox(
          "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January)."
 )
 
+cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(105, 251, 5)]
+floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(95, 24, -5)]
+
+if st.sidebar.button("Advanced...", use_container_width=True):
+    st.session_state["show_advanced_modal"] = True
+
+if st.session_state.get("show_advanced_modal", False):
+    with st.modal("Advanced Controls"):
+        st.markdown(
+            "Configure optional limits that cap increases or decreases suggested by the guardrail strategy."
+        )
+        st.selectbox(
+            "Spending Cap",
+            options=cap_options,
+            key="spending_cap_option",
+            help="Maximum spending level as a percent of the initial monthly spending."
+        )
+        st.selectbox(
+            "Spending Floor",
+            options=floor_options,
+            key="spending_floor_option",
+            help="Minimum spending level as a percent of the initial monthly spending."
+        )
+        if st.button("Close", key="close_advanced_modal"):
+            st.session_state["show_advanced_modal"] = False
+
+
+def _relative_option_to_multiplier(option: str):
+    if option == "Unlimited":
+        return None
+    try:
+        return float(option.strip("%")) / 100.0
+    except (TypeError, ValueError):
+        return None
+
+
+spending_cap_multiplier = _relative_option_to_multiplier(st.session_state.get("spending_cap_option"))
+spending_floor_multiplier = _relative_option_to_multiplier(st.session_state.get("spending_floor_option"))
+
 # Build current simulation parameters dict for change detection
 sim_params = {
     'start_date': pd.to_datetime(start_date),
@@ -304,6 +351,8 @@ sim_params = {
     'lower_adjustment_fraction': float(lower_adjustment_fraction),
     'adjustment_threshold': float(adjustment_threshold),
     'adjustment_frequency': adjustment_frequency,
+    'spending_cap_multiplier': spending_cap_multiplier,
+    'spending_floor_multiplier': spending_floor_multiplier,
 }
 last_run_params = st.session_state.get('last_run_params')
 dirty = last_run_params is not None and last_run_params != sim_params
@@ -375,6 +424,8 @@ if is_guidance:
             upper_adjustment_fraction=upper_adjustment_fraction,
             lower_adjustment_fraction=lower_adjustment_fraction,
             adjustment_frequency=adjustment_frequency,
+            spending_cap=spending_cap_multiplier,
+            spending_floor=spending_floor_multiplier,
             verbose=False
         )
 
@@ -491,6 +542,8 @@ elif st.sidebar.button(
         lower_adjustment_fraction=lower_adjustment_fraction,
         adjustment_threshold=adjustment_threshold,
         adjustment_frequency=adjustment_frequency,
+        spending_cap=spending_cap_multiplier,
+        spending_floor=spending_floor_multiplier,
         verbose=True,
         on_progress=on_progress,
         on_status=on_status
@@ -755,9 +808,41 @@ elif not is_guidance:
         total_guardrails = float(results_df['Withdrawal'].sum())
         diff_ratio = (total_guardrails - total_fixed) / total_fixed if total_fixed else 0.0
 
+        withdrawals = results_df['Withdrawal'].astype(float)
+        min_withdrawal = float(withdrawals.min()) if not withdrawals.empty else 0.0
+        max_withdrawal = float(withdrawals.max()) if not withdrawals.empty else 0.0
+
+        def _longest_run(values, target):
+            longest = 0
+            current = 0
+            for val in values:
+                if np.isclose(val, target, rtol=1e-9, atol=0.5):
+                    current += 1
+                    longest = max(longest, current)
+                else:
+                    current = 0
+            return longest
+
+        min_streak = _longest_run(withdrawals, min_withdrawal)
+        max_streak = _longest_run(withdrawals, max_withdrawal)
+
+        def _fmt_change(new_value):
+            if init_withdrawal == 0:
+                return "N/A"
+            return f"{(new_value / init_withdrawal - 1.0):+.0%}"
+
+        def _fmt_months(months):
+            return f"{months} month{'s' if months != 1 else ''}"
+
         st.markdown(f"Total Withdrawal (Fixed): ${total_fixed:,.0f}")
         st.markdown(f"Total Withdrawal (Using Guardrails): ${total_guardrails:,.0f}")
         st.markdown(f"Difference: {diff_ratio:+.0%}")
+        st.markdown(
+            f"Min Withdrawal: ${min_withdrawal:,.0f} ({_fmt_change(min_withdrawal)}) for {_fmt_months(min_streak)}"
+        )
+        st.markdown(
+            f"Max Withdrawal: ${max_withdrawal:,.0f} ({_fmt_change(max_withdrawal)}) for {_fmt_months(max_streak)}"
+        )
     else:
         st.subheader("Simulation Mode")
         st.markdown("Use this mode to simulate running a guardrail-based retirement withdrawal strategy during a historical period.\n\n"
