@@ -2,6 +2,7 @@ import datetime
 
 import streamlit as st
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 
@@ -389,30 +390,95 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         key="show_guardrail_hits"
     )
 
-    fig1 = go.Figure()
-    if 'Fixed_WR_Value' in results_df.columns:
-        fig1.add_trace(go.Scatter(
-            x=results_df['Date'], y=results_df['Fixed_WR_Value'],
-            mode='lines', name='Value w/Fixed WR', line=dict(color='#7f7f7f'),
-            opacity=0.6,
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-        ))
+    init_withdrawal = float(results_df['Withdrawal'].iloc[0]) if not results_df.empty else 0.0
 
-    fig1.add_trace(go.Scatter(
-        x=results_df['Date'], y=results_df['Upper_Guardrail'],
-        mode='lines', name='Upper Guardrail', line=dict(color='#2ca02c'), opacity=0.45,
-        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-    ))
-    fig1.add_trace(go.Scatter(
-        x=results_df['Date'], y=results_df['Lower_Guardrail'],
-        mode='lines', name='Lower Guardrail', line=dict(color='#d62728'), opacity=0.45,
-        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-    ))
-    fig1.add_trace(go.Scatter(
-        x=results_df['Date'], y=results_df['Portfolio_Value'],
-        mode='lines', name='Portfolio Value', line=dict(color='#1f77b4'),
-        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-    ))
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
+        row_heights=[0.55, 0.45],
+        subplot_titles=("Portfolio Value vs Guardrails", "Withdrawals Over Time")
+    )
+
+    if 'Fixed_WR_Value' in results_df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=results_df['Date'],
+                y=results_df['Fixed_WR_Value'],
+                mode='lines',
+                name='Value w/Fixed WR',
+                line=dict(color='#7f7f7f'),
+                opacity=0.6,
+                hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            ),
+            row=1,
+            col=1
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=results_df['Date'],
+            y=results_df['Upper_Guardrail'],
+            mode='lines',
+            name='Upper Guardrail',
+            line=dict(color='#2ca02c'),
+            opacity=0.45,
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+        ),
+        row=1,
+        col=1
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=results_df['Date'],
+            y=results_df['Lower_Guardrail'],
+            mode='lines',
+            name='Lower Guardrail',
+            line=dict(color='#d62728'),
+            opacity=0.45,
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+        ),
+        row=1,
+        col=1
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=results_df['Date'],
+            y=results_df['Portfolio_Value'],
+            mode='lines',
+            name='Portfolio Value',
+            line=dict(color='#1f77b4'),
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+        ),
+        row=1,
+        col=1
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=results_df['Date'],
+            y=results_df['Withdrawal'],
+            mode='lines',
+            name='Withdrawal',
+            line=dict(color='#9467bd'),
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+        ),
+        row=2,
+        col=1
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=results_df['Date'],
+            y=results_df['Fixed_WR_Withdrawal'] if 'Fixed_WR_Withdrawal' in results_df.columns else [init_withdrawal] * len(results_df),
+            mode='lines',
+            name='Initial Withdrawal',
+            line=dict(color='#7f7f7f', dash='dash'),
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+        ),
+        row=2,
+        col=1
+    )
 
     shapes = []
     if show_guardrail_hits:
@@ -431,66 +497,48 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
                 layer='below'
             ))
 
-    fig1.update_layout(
+    fig.update_layout(
         shapes=shapes,
         hovermode='x unified',
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0, traceorder='reversed'),
-        margin=dict(l=10, r=10, t=10, b=10),
-        dragmode='zoom',
-        xaxis=dict(
-            title='Date',
-            type='date',
-            rangeslider=dict(visible=True),
-            hoverformat='%b %d, %Y'
-        ),
-        yaxis=dict(
-            title='Value ($)',
-            tickprefix='$',
-            tickformat=',.0f',
-            automargin=True,
-            rangemode='tozero'
-        )
+        legend=dict(orientation='h', yanchor='bottom', y=1.08, xanchor='left', x=0, traceorder='reversed'),
+        margin=dict(l=10, r=10, t=60, b=10),
+        dragmode='zoom'
     )
-    st.plotly_chart(fig1, use_container_width=True, config={'scrollZoom': False})
-
-    st.subheader("Withdrawals Over Time")
-
-    init_withdrawal = float(results_df['Withdrawal'].iloc[0]) if not results_df.empty else 0.0
-
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(
-        x=results_df['Date'], y=results_df['Withdrawal'],
-        mode='lines', name='Withdrawal', line=dict(color='#9467bd'),
-        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-    ))
-    fig2.add_trace(go.Scatter(
-        x=results_df['Date'],
-        y=results_df['Fixed_WR_Withdrawal'] if 'Fixed_WR_Withdrawal' in results_df.columns else [init_withdrawal] * len(results_df),
-        mode='lines',
-        name='Initial Withdrawal',
-        line=dict(color='#7f7f7f', dash='dash'),
-        hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-    ))
-    fig2.update_layout(
-        hovermode='x unified',
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-        margin=dict(l=10, r=10, t=10, b=10),
-        dragmode='zoom',
-        xaxis=dict(
-            title='Date',
-            type='date',
-            rangeslider=dict(visible=True),
-            hoverformat='%b %d, %Y'
-        ),
-        yaxis=dict(
-            title='Withdrawal ($/month)',
-            tickprefix='$',
-            tickformat=',.0f',
-            automargin=True,
-            rangemode='tozero'
-        )
+    fig.update_xaxes(
+        type='date',
+        hoverformat='%b %d, %Y',
+        showticklabels=False,
+        row=1,
+        col=1
     )
-    st.plotly_chart(fig2, use_container_width=True, config={'scrollZoom': False})
+    fig.update_xaxes(
+        title_text='Date',
+        type='date',
+        hoverformat='%b %d, %Y',
+        rangeslider=dict(visible=True),
+        row=2,
+        col=1
+    )
+    fig.update_yaxes(
+        title_text='Value ($)',
+        tickprefix='$',
+        tickformat=',.0f',
+        automargin=True,
+        rangemode='tozero',
+        row=1,
+        col=1
+    )
+    fig.update_yaxes(
+        title_text='Withdrawal ($/month)',
+        tickprefix='$',
+        tickformat=',.0f',
+        automargin=True,
+        rangemode='tozero',
+        row=2,
+        col=1
+    )
+
+    st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': False})
 
     total_fixed = float(results_df['Fixed_WR_Withdrawal'].sum()) if 'Fixed_WR_Withdrawal' in results_df.columns else float(init_withdrawal) * len(results_df)
     total_guardrails = float(results_df['Withdrawal'].sum())
