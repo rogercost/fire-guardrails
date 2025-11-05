@@ -396,7 +396,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         rows=2,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.08,
+        vertical_spacing=0.14,
         row_heights=[0.55, 0.45],
         subplot_titles=("Portfolio Value vs Guardrails", "Withdrawals Over Time")
     )
@@ -500,9 +500,17 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
     fig.update_layout(
         shapes=shapes,
         hovermode='x unified',
-        legend=dict(orientation='h', yanchor='bottom', y=1.08, xanchor='left', x=0, traceorder='reversed'),
-        margin=dict(l=10, r=10, t=60, b=10),
-        dragmode='zoom'
+        legend=dict(
+            orientation='h',
+            yanchor='top',
+            y=-0.18,
+            xanchor='center',
+            x=0.5,
+            traceorder='reversed'
+        ),
+        margin=dict(l=10, r=10, t=60, b=90),
+        dragmode='zoom',
+        height=900
     )
     fig.update_xaxes(
         type='date',
