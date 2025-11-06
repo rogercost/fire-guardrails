@@ -482,20 +482,26 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
 
     shapes = []
     if show_guardrail_hits:
+        def _guardrail_marker(date_value, color):
+            return [
+                dict(
+                    type='line', xref='x', yref='y1 domain',
+                    x0=date_value, x1=date_value, y0=0, y1=1,
+                    line=dict(color=color, width=1, dash='dot'),
+                    layer='below'
+                ),
+                dict(
+                    type='line', xref='x', yref='y2 domain',
+                    x0=date_value, x1=date_value, y0=0, y1=1,
+                    line=dict(color=color, width=1, dash='dot'),
+                    layer='below'
+                )
+            ]
+
         for d in results_df.loc[results_df['Guardrail_Hit'] == 'UPPER', 'Date']:
-            shapes.append(dict(
-                type='line', xref='x', yref='paper',
-                x0=d, x1=d, y0=0, y1=1,
-                line=dict(color='#2ca02c', width=1, dash='dot'),
-                layer='below'
-            ))
+            shapes.extend(_guardrail_marker(d, '#2ca02c'))
         for d in results_df.loc[results_df['Guardrail_Hit'] == 'LOWER', 'Date']:
-            shapes.append(dict(
-                type='line', xref='x', yref='paper',
-                x0=d, x1=d, y0=0, y1=1,
-                line=dict(color='#d62728', width=1, dash='dot'),
-                layer='below'
-            ))
+            shapes.extend(_guardrail_marker(d, '#d62728'))
 
     fig.update_layout(
         shapes=shapes,
@@ -503,11 +509,12 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         legend=dict(
             orientation='h',
             yanchor='top',
-            y=-0.18,
+            y=-0.3,
             xanchor='center',
             x=0.5,
             traceorder='reversed'
         ),
+        showlegend=True,
         margin=dict(l=10, r=10, t=60, b=90),
         dragmode='zoom',
         height=900
@@ -523,7 +530,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         title_text='Date',
         type='date',
         hoverformat='%b %d, %Y',
-        rangeslider=dict(visible=True),
+        rangeslider=dict(visible=False),
         row=2,
         col=1
     )
