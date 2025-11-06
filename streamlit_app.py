@@ -375,13 +375,10 @@ def render_dirty_banner():
 
 def render_simulation_results(results_df: pd.DataFrame) -> None:
     """Render charts and summaries for simulation results."""
-    st.subheader("Simulation Mode")
 
     if results_df is None or results_df.empty:
         st.info("No simulation results to display.")
         return
-
-    st.subheader("Portfolio Value vs Guardrails")
 
     show_guardrail_hits = st.checkbox(
         "Show guardrail hit markers",
@@ -515,14 +512,19 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             traceorder='reversed'
         ),
         showlegend=True,
-        margin=dict(l=10, r=10, t=60, b=90),
+        margin=dict(l=10, r=10, t=80, b=90),
         dragmode='zoom',
         height=900
+    )
+    fig.update_annotations(
+        font=dict(size=24),
+        yshift=12,
+        yanchor='bottom'
     )
     fig.update_xaxes(
         type='date',
         hoverformat='%b %d, %Y',
-        showticklabels=False,
+        showticklabels=True,
         row=1,
         col=1
     )
