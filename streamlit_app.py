@@ -485,7 +485,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         def _guardrail_marker(date_value, color):
             return [
                 dict(
-                    type='line', xref='x', yref='y1 domain',
+                    type='line', xref='x', yref='y domain',
                     x0=date_value, x1=date_value, y0=0, y1=1,
                     line=dict(color=color, width=1, dash='dot'),
                     layer='below'
