@@ -506,15 +506,16 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         legend=dict(
             orientation='h',
             yanchor='top',
-            y=-0.3,
+            y=-0.16,
             xanchor='center',
             x=0.5,
             traceorder='reversed'
         ),
         showlegend=True,
-        margin=dict(l=10, r=10, t=80, b=90),
+        margin=dict(l=10, r=10, t=80, b=60),
         dragmode='zoom',
-        height=900
+        height=900,
+        xaxis=dict(rangeslider=dict(visible=False))
     )
     fig.update_annotations(
         font=dict(size=24),
