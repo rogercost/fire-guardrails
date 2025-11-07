@@ -116,13 +116,56 @@ stock_pct = st.sidebar.slider(
     help="Fraction of the portfolio allocated to US stocks; remainder to 10Y treasuries."
 )
 
-with st.sidebar.expander("Additional Cashflows"):
+# Ensure widget defaults for existing cashflows remain synchronized prior to rendering inputs
+def _ensure_cashflow_widget_state(idx: int, flow: dict) -> None:
+    start_key = f"cf_start_{idx}"
+    end_key = f"cf_end_{idx}"
+    amount_key = f"cf_amount_{idx}"
+
+    default_start = int(flow.get("start_month", 0))
+    default_end = int(flow.get("end_month", default_start))
+    default_amount = float(flow.get("amount", 0.0))
+
+    if start_key not in st.session_state:
+        st.session_state[start_key] = default_start
+
+    if end_key not in st.session_state:
+        st.session_state[end_key] = max(default_end, st.session_state[start_key])
+    elif st.session_state[end_key] < st.session_state[start_key]:
+        st.session_state[end_key] = st.session_state[start_key]
+
+    if amount_key not in st.session_state:
+        st.session_state[amount_key] = default_amount
+
+
+cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(105, 251, 5)]
+floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(95, 24, -5)]
+
+with st.sidebar.expander("Advanced Controls"):
     st.markdown(
-        "Define recurring cashflows (e.g., pensions or Social Security). "
+        "Configure optional guardrail limits and manage additional recurring cashflows."
+    )
+    st.selectbox(
+        "Spending Cap",
+        options=cap_options,
+        key="spending_cap_option",
+        help="Maximum spending level as a percent of the initial monthly spending.",
+    )
+    st.selectbox(
+        "Spending Floor",
+        options=floor_options,
+        key="spending_floor_option",
+        help="Minimum spending level as a percent of the initial monthly spending.",
+    )
+
+    st.markdown("---")
+    st.markdown("**Recurring Cashflows**")
+    st.caption(
+        "Create recurring income streams (e.g., pensions or Social Security). "
         "Start and end months are offsets from the retirement start month and are inclusive."
     )
 
-    if st.button("Add Cashflow", key="add_cashflow_btn"):
+    if st.button("Create Cashflow", key="add_cashflow_btn"):
         st.session_state["cashflows"].append({
             "start_month": 0,
             "end_month": 0,
@@ -131,35 +174,33 @@ with st.sidebar.expander("Additional Cashflows"):
 
     remove_indices = []
     for idx, flow in enumerate(st.session_state["cashflows"]):
+        _ensure_cashflow_widget_state(idx, flow)
+
         st.markdown(f"**Cashflow {idx + 1}**")
         col_start, col_end, col_amount = st.columns(3)
         start_val = col_start.number_input(
             "Start (mo)",
             min_value=0,
-            value=int(flow.get("start_month", 0)),
             step=1,
-            key=f"cf_start_{idx}"
+            key=f"cf_start_{idx}",
         )
         end_val = col_end.number_input(
             "End (mo)",
             min_value=0,
-            value=int(flow.get("end_month", flow.get("start_month", 0))),
             step=1,
-            key=f"cf_end_{idx}"
+            key=f"cf_end_{idx}",
         )
         amount_val = col_amount.number_input(
             "Amount ($/mo)",
-            value=float(flow.get("amount", 0.0)),
             step=50.0,
             format="%0.2f",
-            key=f"cf_amount_{idx}"
+            key=f"cf_amount_{idx}",
         )
 
         start_int = int(start_val)
         end_int = int(end_val)
         if end_int < start_int:
             end_int = start_int
-            st.session_state[f"cf_end_{idx}"] = end_int
 
         st.session_state["cashflows"][idx] = {
             "start_month": start_int,
@@ -174,6 +215,7 @@ with st.sidebar.expander("Additional Cashflows"):
         for index in sorted(remove_indices, reverse=True):
             st.session_state["cashflows"].pop(index)
         st.rerun()
+
 
 cashflows = _sanitize_cashflows(st.session_state.get("cashflows"))
 
@@ -392,27 +434,6 @@ adjustment_frequency = st.sidebar.selectbox(
     help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
          "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January)."
 )
-
-cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(105, 251, 5)]
-floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(95, 24, -5)]
-
-with st.sidebar.expander("Advanced Controls"):
-    st.markdown(
-        "Configure optional limits that cap increases or decreases suggested by the guardrail strategy."
-    )
-    st.selectbox(
-        "Spending Cap",
-        options=cap_options,
-        key="spending_cap_option",
-        help="Maximum spending level as a percent of the initial monthly spending."
-    )
-    st.selectbox(
-        "Spending Floor",
-        options=floor_options,
-        key="spending_floor_option",
-        help="Minimum spending level as a percent of the initial monthly spending."
-    )
-
 
 def _relative_option_to_multiplier(option: str):
     if option == "Unlimited":
