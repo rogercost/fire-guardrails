@@ -61,6 +61,29 @@ def _cashflows_to_tuple(cashflows):
     return tuple((cf["start_month"], cf["end_month"], cf["amount"]) for cf in cashflows)
 
 
+def _clear_cashflow_widget_state(start_idx: int = 0) -> None:
+    """Remove cached widget values for cashflows starting from ``start_idx``."""
+
+    prefixes = (
+        "cf_start_",
+        "cf_end_",
+        "cf_amount_",
+        "cf_label_",
+    )
+
+    keys_to_drop = []
+    for key in list(st.session_state.keys()):
+        for prefix in prefixes:
+            if key.startswith(prefix):
+                suffix = key[len(prefix) :]
+                if suffix.isdigit() and int(suffix) >= start_idx:
+                    keys_to_drop.append(key)
+                break
+
+    for key in keys_to_drop:
+        del st.session_state[key]
+
+
 # Sidebar for inputs
 st.sidebar.header("Simulation Parameters")
 
@@ -808,6 +831,7 @@ with st.sidebar.expander("Advanced Controls"):
         )
         if remove_col.button("✕", key=f"cf_remove_{idx}"):
             st.session_state["cashflows"].pop(idx)
+            _clear_cashflow_widget_state(idx)
             st.rerun()
 
         col_start, col_end, col_amount = st.columns(3)
