@@ -556,13 +556,13 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         row=2,
         col=1
     )
-    if 'Cashflow' in results_df.columns:
+    if 'Net_Cashflow' in results_df.columns:
         fig.add_trace(
             go.Scatter(
                 x=results_df['Date'],
-                y=results_df['Cashflow'],
+                y=results_df['Net_Cashflow'],
                 mode='lines',
-                name='Cashflow',
+                name='Net Cashflow',
                 line=dict(color='#17becf', dash='dot'),
                 hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
             ),
@@ -678,7 +678,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
 
     total_fixed = float(results_df['Fixed_WR_Withdrawal'].sum()) if 'Fixed_WR_Withdrawal' in results_df.columns else float(init_withdrawal) * len(results_df)
     total_guardrails = float(results_df['Withdrawal'].sum())
-    total_cashflow = float(results_df['Cashflow'].sum()) if 'Cashflow' in results_df.columns else 0.0
+    total_cashflow = float(results_df['Net_Cashflow'].sum()) if 'Net_Cashflow' in results_df.columns else 0.0
     total_income_guardrails = float(results_df['Total_Income'].sum()) if 'Total_Income' in results_df.columns else total_guardrails + total_cashflow
     total_income_fixed = float(results_df['Fixed_WR_Total_Income'].sum()) if 'Fixed_WR_Total_Income' in results_df.columns else total_fixed + total_cashflow
     withdrawal_diff_ratio = (total_guardrails - total_fixed) / total_fixed if total_fixed else None
@@ -688,8 +688,8 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         income_series = results_df['Total_Income'].astype(float)
     else:
         income_series = results_df['Withdrawal'].astype(float) if 'Withdrawal' in results_df.columns else pd.Series(dtype=float)
-        if 'Cashflow' in results_df.columns and not income_series.empty:
-            income_series = income_series + results_df['Cashflow'].astype(float)
+        if 'Net_Cashflow' in results_df.columns and not income_series.empty:
+            income_series = income_series + results_df['Net_Cashflow'].astype(float)
 
     start_income = float(income_series.iloc[0]) if not income_series.empty else None
     min_income = float(income_series.min()) if not income_series.empty else None
