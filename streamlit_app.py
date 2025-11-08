@@ -279,8 +279,9 @@ target_success_rate = st.sidebar.slider(
     help="Desired probability of success that will be used to select an initial withdrawal rate.\n\nThe initial "
          "withdrawal rate will be the rate at which fixed withdrawals over all periods of time with length = the "
          "configured retirement period length, between the Historical Analysis Start Date and the Retirement Start "
-         "Date, end with >0 values this percent of the time.\n\nSetting this higher is more aggressive, and increases "
-         "the probability that your first adjustment will be a decrease as opposed to an increase in spending.",
+         "Date, end with >0 values this percent of the time.\n\nSetting this higher, e.g. 0.80-0.99, is more conservative: "
+         "lower initial spending, lower chance of adjustment; setting this lower is more aggressive, 0.75-0.60 provides higher "
+         "initial spending, higher chance of adjustment.",
     key="target_success_rate"
 )
 # Compute dynamic labels for Guardrail Success Rates showing initial (first period) PVs
