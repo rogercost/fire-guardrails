@@ -740,7 +740,7 @@ with st.sidebar.expander("Advanced Controls"):
         help="Minimum spending level as a percent of the initial monthly spending.",
     )
 
-    if st.button("Create Recurring Cashflow", key="add_cashflow_btn"):
+    if st.button("Add Recurring Cashflow", key="add_cashflow_btn"):
         st.session_state["cashflows"].append({
             "start_month": 0,
             "end_month": 0,
@@ -767,13 +767,13 @@ with st.sidebar.expander("Advanced Controls"):
 
         col_start, col_end, col_amount = st.columns(3)
         col_start.number_input(
-            "Start (mo)",
+            "Start Month",
             min_value=0,
             step=1,
             key=f"cf_start_{idx}",
         )
         col_end.number_input(
-            "End (mo)",
+            "End Month",
             min_value=0,
             step=1,
             key=f"cf_end_{idx}",
