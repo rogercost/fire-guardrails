@@ -33,6 +33,8 @@ if "spending_floor_option" not in st.session_state:
     st.session_state["spending_floor_option"] = "Unlimited"
 if "cashflows" not in st.session_state:
     st.session_state["cashflows"] = []
+if "current_monthly_spending" not in st.session_state:
+    st.session_state["current_monthly_spending"] = 3300.0
 
 
 # Helpers for cashflow management
@@ -121,17 +123,6 @@ initial_value = st.sidebar.number_input(
     "Initial Portfolio Value",
     value=1_000_000, min_value=100_000, step=100_000,
     help="Starting portfolio balance in dollars at retirement."
-)
-
-# New input used by Guidance Mode (hidden/disabled in Simulation Mode)
-current_monthly_spending = st.sidebar.number_input(
-    "Current Monthly Spending",
-    value=3300,
-    min_value=0,
-    step=10,
-    help="Your current monthly spending level. Used only in Guidance Mode to compute guardrail values and hypothetical adjustments.",
-    disabled=not is_guidance,
-    key="current_monthly_spending"
 )
 
 stock_pct = st.sidebar.slider(
@@ -280,6 +271,7 @@ try:
 except Exception:
     iwr_label_suffix = " (Initial WR: N/A)"
 target_success_label = f"Target Success Rate{iwr_label_suffix}"
+prev_target_success_rate = st.session_state.get("_prev_target_success_rate")
 target_success_rate = st.sidebar.slider(
     target_success_label, value=st.session_state.get("target_success_rate", 0.90), min_value=0.0, max_value=1.0, step=0.01,
     help="Desired probability of success that will be used to select an initial withdrawal rate.\n\nThe initial "
@@ -290,6 +282,84 @@ target_success_rate = st.sidebar.slider(
          "initial spending, higher chance of adjustment.",
     key="target_success_rate"
 )
+
+recommended_initial_spending = None
+if st.session_state.get('iwr_value') is not None:
+    try:
+        recommended_initial_spending = float(initial_value) * float(st.session_state['iwr_value']) / 12.0
+    except (TypeError, ValueError):
+        recommended_initial_spending = None
+
+if not is_guidance:
+    target_changed = (
+        prev_target_success_rate is None
+        or not np.isclose(float(prev_target_success_rate), float(target_success_rate))
+    )
+    if target_changed and recommended_initial_spending is not None:
+        st.session_state['initial_monthly_spending'] = float(recommended_initial_spending)
+    elif 'initial_monthly_spending' not in st.session_state and recommended_initial_spending is not None:
+        st.session_state['initial_monthly_spending'] = float(recommended_initial_spending)
+
+st.session_state['_prev_target_success_rate'] = float(target_success_rate)
+
+spending_label = "Current Monthly Spending" if is_guidance else "Initial Monthly Spending"
+spending_help = (
+    "Your current monthly spending level. Used only in Guidance Mode to compute guardrail values and hypothetical adjustments."
+    if is_guidance
+    else "Monthly spending level used at the start of the simulation before any guardrail adjustments are applied."
+)
+
+if not is_guidance and 'initial_monthly_spending' not in st.session_state:
+    st.session_state['initial_monthly_spending'] = float(recommended_initial_spending or 0.0)
+
+spending_key = "current_monthly_spending" if is_guidance else "initial_monthly_spending"
+default_spending_value = float(st.session_state.get(spending_key, recommended_initial_spending or 0.0))
+
+st.sidebar.number_input(
+    spending_label,
+    value=default_spending_value,
+    min_value=0.0,
+    step=10.0,
+    help=spending_help,
+    key=spending_key,
+)
+
+if not is_guidance:
+    success_rate_caption = "Success Rate at this spending: N/A"
+    current_initial_spending = st.session_state.get("initial_monthly_spending")
+    try:
+        if (
+            current_initial_spending is not None
+            and float(initial_value) > 0
+            and int(retirement_duration_months) > 0
+        ):
+            shiller_df = st.session_state.get('shiller_df')
+            if shiller_df is None:
+                shiller_df = utils.load_shiller_data()
+                st.session_state['shiller_df'] = shiller_df
+
+            schedule = utils.cashflow_schedule_for_window(
+                cashflows,
+                int(retirement_duration_months),
+                0,
+            )
+            withdrawal_rate = (float(current_initial_spending) * 12.0) / float(initial_value)
+            success_rate = utils.calculate_success_rate(
+                df=shiller_df,
+                withdrawal_rate=withdrawal_rate,
+                num_months=int(retirement_duration_months),
+                stock_pct=float(stock_pct),
+                analysis_start_date=analysis_start_date,
+                analysis_end_date=start_date,
+                initial_value=float(initial_value),
+                monthly_cashflows=schedule,
+            )
+            if success_rate is not None and np.isfinite(success_rate):
+                success_rate_caption = f"Success Rate at this spending: {success_rate * 100:.1f}%"
+    except Exception:
+        success_rate_caption = "Success Rate at this spending: N/A"
+
+    st.sidebar.caption(success_rate_caption)
 # Compute dynamic labels for Guardrail Success Rates showing initial (first period) PVs
 upper_label_suffix = ""
 lower_label_suffix = ""
@@ -454,6 +524,9 @@ sim_params = {
     'analysis_start_date': pd.to_datetime(analysis_start_date),
     'initial_value': float(initial_value),
     'stock_pct': float(stock_pct),
+    'initial_monthly_spending': float(
+        st.session_state.get("initial_monthly_spending", recommended_initial_spending or 0.0)
+    ),
     'target_success_rate': float(target_success_rate),
     'upper_guardrail_success': float(upper_guardrail_success),
     'lower_guardrail_success': float(lower_guardrail_success),
@@ -1009,6 +1082,7 @@ elif st.sidebar.button(
         analysis_start_date=analysis_start_date,
         initial_value=initial_value,
         stock_pct=stock_pct,
+        initial_monthly_spending=st.session_state.get("initial_monthly_spending"),
         target_success_rate=target_success_rate,
         upper_guardrail_success=upper_guardrail_success,
         lower_guardrail_success=lower_guardrail_success,

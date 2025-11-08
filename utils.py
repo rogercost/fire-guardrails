@@ -339,6 +339,7 @@ def get_guardrail_withdrawals(df, start_date, end_date,
                               analysis_start_date='1871-01-01',
                               initial_value=1_000_000,
                               stock_pct=0.75,
+                              initial_monthly_spending=None,
                               target_success_rate=0.90,
                               upper_guardrail_success=1.00,
                               lower_guardrail_success=0.75,
@@ -361,6 +362,13 @@ def get_guardrail_withdrawals(df, start_date, end_date,
     3. If portfolio hits guardrails, adjust spending
     4. Only implement adjustment if it exceeds threshold (to avoid constant small changes)
     5. Optionally cap or floor the resulting spending relative to the initial monthly amount
+
+    Parameters
+    ----------
+    initial_monthly_spending : float, optional
+        Override the starting monthly spending level. When provided, the simulation begins at this
+        spending amount instead of the level implied by ``target_success_rate``. Subsequent guardrail
+        adjustments continue to be based on the configured success rates.
 
     Returns
     -------
@@ -411,7 +419,18 @@ def get_guardrail_withdrawals(df, start_date, end_date,
 
     # State variables
     current_portfolio_value = initial_value
-    previous_total_spending = initial_value * initial_wr / 12
+    computed_initial_spending = initial_value * initial_wr / 12
+    if initial_monthly_spending is not None:
+        try:
+            starting_spending = float(initial_monthly_spending)
+        except (TypeError, ValueError):
+            starting_spending = computed_initial_spending
+    else:
+        starting_spending = computed_initial_spending
+    if starting_spending < 0:
+        starting_spending = 0.0
+
+    previous_total_spending = starting_spending
     cap_amount = (
         previous_total_spending * float(spending_cap)
         if spending_cap is not None else None
