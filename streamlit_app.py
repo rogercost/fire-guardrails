@@ -121,10 +121,12 @@ def _ensure_cashflow_widget_state(idx: int, flow: dict) -> None:
     start_key = f"cf_start_{idx}"
     end_key = f"cf_end_{idx}"
     amount_key = f"cf_amount_{idx}"
+    label_key = f"cf_label_{idx}"
 
     default_start = int(flow.get("start_month", 0))
     default_end = int(flow.get("end_month", default_start))
     default_amount = float(flow.get("amount", 0.0))
+    default_label = str(flow.get("label") or f"Cashflow {idx + 1}")
 
     if start_key not in st.session_state:
         st.session_state[start_key] = default_start
@@ -137,85 +139,59 @@ def _ensure_cashflow_widget_state(idx: int, flow: dict) -> None:
     if amount_key not in st.session_state:
         st.session_state[amount_key] = default_amount
 
+    if label_key not in st.session_state or not str(st.session_state[label_key]).strip():
+        st.session_state[label_key] = default_label
+
+
+def _sync_cashflows_from_widgets() -> None:
+    flows = st.session_state.get("cashflows")
+    if not flows:
+        return
+
+    for idx, flow in enumerate(flows):
+        start_key = f"cf_start_{idx}"
+        end_key = f"cf_end_{idx}"
+        amount_key = f"cf_amount_{idx}"
+        label_key = f"cf_label_{idx}"
+
+        try:
+            start_val = int(st.session_state.get(start_key, flow.get("start_month", 0)))
+        except (TypeError, ValueError):
+            start_val = int(flow.get("start_month", 0))
+
+        try:
+            end_val = int(st.session_state.get(end_key, flow.get("end_month", start_val)))
+        except (TypeError, ValueError):
+            end_val = int(flow.get("end_month", start_val))
+
+        if end_val < start_val:
+            end_val = start_val
+
+        try:
+            amount_val = float(st.session_state.get(amount_key, flow.get("amount", 0.0)))
+        except (TypeError, ValueError):
+            amount_val = float(flow.get("amount", 0.0))
+
+        label_raw = st.session_state.get(label_key, flow.get("label") or f"Cashflow {idx + 1}")
+        label_val = str(label_raw).strip() or f"Cashflow {idx + 1}"
+
+        st.session_state[start_key] = start_val
+        st.session_state[end_key] = end_val
+        st.session_state[amount_key] = amount_val
+        st.session_state[label_key] = label_val
+
+        flows[idx] = {
+            "start_month": start_val,
+            "end_month": end_val,
+            "amount": amount_val,
+            "label": label_val,
+        }
+
 
 cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(105, 251, 5)]
 floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(95, 24, -5)]
 
-with st.sidebar.expander("Advanced Controls"):
-    st.markdown(
-        "Configure optional guardrail limits and manage additional recurring cashflows."
-    )
-    st.selectbox(
-        "Spending Cap",
-        options=cap_options,
-        key="spending_cap_option",
-        help="Maximum spending level as a percent of the initial monthly spending.",
-    )
-    st.selectbox(
-        "Spending Floor",
-        options=floor_options,
-        key="spending_floor_option",
-        help="Minimum spending level as a percent of the initial monthly spending.",
-    )
-
-    st.markdown("---")
-    st.markdown("**Recurring Cashflows**")
-    st.caption(
-        "Create recurring income streams (e.g., pensions or Social Security). "
-        "Start and end months are offsets from the retirement start month and are inclusive."
-    )
-
-    if st.button("Create Cashflow", key="add_cashflow_btn"):
-        st.session_state["cashflows"].append({
-            "start_month": 0,
-            "end_month": 0,
-            "amount": 0.0,
-        })
-
-    remove_indices = []
-    for idx, flow in enumerate(st.session_state["cashflows"]):
-        _ensure_cashflow_widget_state(idx, flow)
-
-        st.markdown(f"**Cashflow {idx + 1}**")
-        col_start, col_end, col_amount = st.columns(3)
-        start_val = col_start.number_input(
-            "Start (mo)",
-            min_value=0,
-            step=1,
-            key=f"cf_start_{idx}",
-        )
-        end_val = col_end.number_input(
-            "End (mo)",
-            min_value=0,
-            step=1,
-            key=f"cf_end_{idx}",
-        )
-        amount_val = col_amount.number_input(
-            "Amount ($/mo)",
-            step=50.0,
-            format="%0.2f",
-            key=f"cf_amount_{idx}",
-        )
-
-        start_int = int(start_val)
-        end_int = int(end_val)
-        if end_int < start_int:
-            end_int = start_int
-
-        st.session_state["cashflows"][idx] = {
-            "start_month": start_int,
-            "end_month": end_int,
-            "amount": float(amount_val),
-        }
-
-        if st.button("Remove", key=f"cf_remove_{idx}"):
-            remove_indices.append(idx)
-
-    if remove_indices:
-        for index in sorted(remove_indices, reverse=True):
-            st.session_state["cashflows"].pop(index)
-        st.rerun()
-
+_sync_cashflows_from_widgets()
 
 cashflows = _sanitize_cashflows(st.session_state.get("cashflows"))
 
@@ -748,6 +724,66 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
     st.markdown(
         f"Max Withdrawal: ${max_withdrawal:,.0f} ({_fmt_change(max_withdrawal)}) for {_fmt_months(max_streak)}"
     )
+
+
+with st.sidebar.expander("Advanced Controls"):
+    st.selectbox(
+        "Spending Cap",
+        options=cap_options,
+        key="spending_cap_option",
+        help="Maximum spending level as a percent of the initial monthly spending.",
+    )
+    st.selectbox(
+        "Spending Floor",
+        options=floor_options,
+        key="spending_floor_option",
+        help="Minimum spending level as a percent of the initial monthly spending.",
+    )
+
+    if st.button("Create Recurring Cashflow", key="add_cashflow_btn"):
+        st.session_state["cashflows"].append({
+            "start_month": 0,
+            "end_month": 0,
+            "amount": 0.0,
+            "label": f"Cashflow {len(st.session_state['cashflows']) + 1}",
+        })
+        st.rerun()
+
+    for idx, flow in enumerate(st.session_state["cashflows"]):
+        _ensure_cashflow_widget_state(idx, flow)
+
+        name_col, remove_col = st.columns([1, 0.15])
+        label_key = f"cf_label_{idx}"
+        name_col.text_input(
+            "Cashflow Name",
+            value=st.session_state.get(label_key, f"Cashflow {idx + 1}"),
+            key=label_key,
+            label_visibility="collapsed",
+            placeholder="Cashflow name",
+        )
+        if remove_col.button("✕", key=f"cf_remove_{idx}"):
+            st.session_state["cashflows"].pop(idx)
+            st.rerun()
+
+        col_start, col_end, col_amount = st.columns(3)
+        col_start.number_input(
+            "Start (mo)",
+            min_value=0,
+            step=1,
+            key=f"cf_start_{idx}",
+        )
+        col_end.number_input(
+            "End (mo)",
+            min_value=0,
+            step=1,
+            key=f"cf_end_{idx}",
+        )
+        col_amount.number_input(
+            "Amount ($/mo)",
+            step=50.0,
+            format="%0.2f",
+            key=f"cf_amount_{idx}",
+        )
 
 
 # When inputs change, visually dim and surround the main area with a red border
