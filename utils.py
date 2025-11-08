@@ -427,6 +427,7 @@ def get_guardrail_withdrawals(df, start_date, end_date,
             starting_spending = computed_initial_spending
     else:
         starting_spending = computed_initial_spending
+
     if starting_spending < 0:
         starting_spending = 0.0
 
@@ -446,63 +447,6 @@ def get_guardrail_withdrawals(df, start_date, end_date,
 
     guardrail_depleted = False
     fixed_depleted = False
-
-    def _compute_guardrail_value(spending_amount, wr_value):
-        if spending_amount is None:
-            return None
-        if wr_value is None or wr_value <= 0:
-            return None
-        return spending_amount / wr_value * 12
-
-    # Establish the initial guardrail portfolio values using the configured starting spending level.
-    try:
-        initial_upper_wr_res = get_wr_for_fixed_success_rate(
-            df=df,
-            desired_success_rate=upper_guardrail_success,
-            num_months=total_months,
-            analysis_start_date=analysis_start_date,
-            analysis_end_date=start_date,
-            initial_value=initial_value,
-            stock_pct=stock_pct,
-            tolerance=0.001,
-            max_iterations=50,
-            verbose=False,
-            cashflows=cashflows,
-            cashflow_schedule=monthly_cashflows,
-        )
-        initial_upper_wr = (
-            float(initial_upper_wr_res['withdrawal_rate'])
-            if initial_upper_wr_res['withdrawal_rate'] is not None
-            else None
-        )
-    except Exception:
-        initial_upper_wr = None
-
-    try:
-        initial_lower_wr_res = get_wr_for_fixed_success_rate(
-            df=df,
-            desired_success_rate=lower_guardrail_success,
-            num_months=total_months,
-            analysis_start_date=analysis_start_date,
-            analysis_end_date=start_date,
-            initial_value=initial_value,
-            stock_pct=stock_pct,
-            tolerance=0.001,
-            max_iterations=50,
-            verbose=False,
-            cashflows=cashflows,
-            cashflow_schedule=monthly_cashflows,
-        )
-        initial_lower_wr = (
-            float(initial_lower_wr_res['withdrawal_rate'])
-            if initial_lower_wr_res['withdrawal_rate'] is not None
-            else None
-        )
-    except Exception:
-        initial_lower_wr = None
-
-    current_upper_guardrail_value = _compute_guardrail_value(previous_total_spending, initial_upper_wr)
-    current_lower_guardrail_value = _compute_guardrail_value(previous_total_spending, initial_lower_wr)
 
     def _is_adjustment_month(ts: pd.Timestamp) -> bool:
         month = int(ts.month)
@@ -547,11 +491,6 @@ def get_guardrail_withdrawals(df, start_date, end_date,
                 cashflow_schedule=schedule_slice,
             )['withdrawal_rate']
 
-        upper_guardrail_value = current_upper_guardrail_value
-        lower_guardrail_value = current_lower_guardrail_value
-        new_upper_guardrail_value = current_upper_guardrail_value
-        new_lower_guardrail_value = current_lower_guardrail_value
-
         if not guardrail_depleted:
             # Calculate 3 withdrawal rates: the target, and the upper and lower guardrail, based on the current portfolio
             # value and months remaining
@@ -561,6 +500,16 @@ def get_guardrail_withdrawals(df, start_date, end_date,
             upper_wr = get_withdrawal_rate(success_rate=upper_guardrail_success)
 
             lower_wr = get_withdrawal_rate(success_rate=lower_guardrail_success)
+
+            # The guardrail portfolio values are the values that would result in the current withdrawal amount
+            # representing a probability of success equal to each guardrail's probability.
+            #
+            upper_guardrail_value = (
+                previous_total_spending / upper_wr * 12 if (upper_wr is not None and upper_wr > 0) else np.inf
+            )
+            lower_guardrail_value = (
+                previous_total_spending / lower_wr * 12 if (lower_wr is not None and lower_wr > 0) else np.inf
+            )
 
             if verbose and i % 12 == 0:
                 print(f"Processing {current_date.strftime('%Y-%m')}, portfolio=${current_portfolio_value:,.0f}, "
@@ -611,8 +560,6 @@ def get_guardrail_withdrawals(df, start_date, end_date,
                     # Make the adjustment
                     spending_target = bounded_spending
                     adjustment_made = True
-                    new_upper_guardrail_value = _compute_guardrail_value(spending_target, upper_wr)
-                    new_lower_guardrail_value = _compute_guardrail_value(spending_target, lower_wr)
                 else:
                     # Keep previous spending (inflation adjusted)
                     spending_target = previous_total_spending
@@ -632,8 +579,6 @@ def get_guardrail_withdrawals(df, start_date, end_date,
             guardrail_hit = "DEPLETED"
             percent_change = 0.0
             adjustment_allowed = False
-            new_upper_guardrail_value = 0.0
-            new_lower_guardrail_value = 0.0
 
         withdrawal_amount = spending_target - current_cashflow
         if withdrawal_amount < 0.0:
@@ -687,9 +632,6 @@ def get_guardrail_withdrawals(df, start_date, end_date,
 
         # Update state
         previous_total_spending = spending_target
-        current_upper_guardrail_value = new_upper_guardrail_value
-        current_lower_guardrail_value = new_lower_guardrail_value
-
     return pd.DataFrame(results)
 
 def compute_guardrail_guidance_snapshot(
