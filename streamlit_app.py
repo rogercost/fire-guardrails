@@ -123,17 +123,6 @@ initial_value = st.sidebar.number_input(
     help="Starting portfolio balance in dollars at retirement."
 )
 
-# New input used by Guidance Mode (hidden/disabled in Simulation Mode)
-current_monthly_spending = st.sidebar.number_input(
-    "Current Monthly Spending",
-    value=3300,
-    min_value=0,
-    step=10,
-    help="Your current monthly spending level. Used only in Guidance Mode to compute guardrail values and hypothetical adjustments.",
-    disabled=not is_guidance,
-    key="current_monthly_spending"
-)
-
 stock_pct = st.sidebar.slider(
     "Stock Percentage", value=0.75, min_value=0.0, max_value=1.0, step=0.05,
     help="Fraction of the portfolio allocated to US stocks; remainder to 10Y treasuries."
@@ -287,23 +276,21 @@ failsafe_mode = st.sidebar.checkbox(
     key="failsafe_mode"
 )
 
-if failsafe_mode:
-    fallback_spending = st.session_state.get("fixed_initial_spending")
-    if fallback_spending is None:
-        if iwr is not None:
-            fallback_spending = float(initial_value) * float(iwr) / 12.0
-        else:
-            fallback_spending = float(initial_value) * 0.04 / 12.0
-    fixed_initial_spending = st.sidebar.number_input(
-        "Initial Monthly Spending",
-        value=float(fallback_spending),
-        min_value=0.0,
-        step=50.0,
-        help="Monthly spending amount to maintain throughout the simulation.",
-        key="fixed_initial_spending"
-    )
-else:
-    fixed_initial_spending = None
+fallback_spending = st.session_state.get("initial_monthly_spending")
+if fallback_spending is None:
+    if iwr is not None:
+        fallback_spending = float(initial_value) * float(iwr) / 12.0
+    else:
+        fallback_spending = float(initial_value) * 0.04 / 12.0
+
+initial_monthly_spending = st.sidebar.number_input(
+    "Initial Monthly Spending",
+    value=float(fallback_spending),
+    min_value=0.0,
+    step=50.0,
+    help="Monthly spending amount used at the start of the simulation and for guardrail guidance.",
+    key="initial_monthly_spending",
+)
 
 if failsafe_mode and st.session_state.get("spending_cap_option") != "100%":
     st.session_state["spending_cap_option"] = "100%"
@@ -521,9 +508,21 @@ sim_params = {
     'spending_floor_multiplier': spending_floor_multiplier,
     'cashflows': _cashflows_to_tuple(cashflows),
     'failsafe_mode': bool(failsafe_mode),
-    'fixed_initial_spending': float(fixed_initial_spending) if fixed_initial_spending is not None else None,
+    'initial_monthly_spending': float(initial_monthly_spending),
 }
 last_run_params = st.session_state.get('last_run_params')
+if isinstance(last_run_params, dict):
+    normalized_last_run = dict(last_run_params)
+    if 'initial_monthly_spending' not in normalized_last_run:
+        previous_fixed_value = normalized_last_run.pop('fixed_initial_spending', None)
+        if previous_fixed_value is None:
+            previous_fixed_value = initial_monthly_spending
+        try:
+            normalized_last_run['initial_monthly_spending'] = float(previous_fixed_value)
+        except (TypeError, ValueError):
+            normalized_last_run['initial_monthly_spending'] = float(initial_monthly_spending)
+        st.session_state['last_run_params'] = normalized_last_run
+    last_run_params = normalized_last_run
 dirty = last_run_params is not None and last_run_params != sim_params
 st.session_state['dirty'] = dirty
 
@@ -950,7 +949,7 @@ if is_guidance:
             duration_months=int(retirement_duration_months),
             analysis_start_date=analysis_start_date,
             current_portfolio_value=initial_value,
-            current_monthly_spending=st.session_state.get("current_monthly_spending", 40000.0),
+            initial_monthly_spending=initial_monthly_spending,
             stock_pct=stock_pct,
             target_success_rate=target_success_rate,
             upper_guardrail_success=upper_guardrail_success,
@@ -1019,19 +1018,19 @@ if is_guidance:
         st.markdown(f"* **Month 1 Cashflows:** {fmt_money(cashflow_month0)}/month")
         if adjustments_allowed:
             st.markdown(
-                f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Current Monthly Spending\n  * If client's portfolio value exceeds this, adjust "
+                f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Initial Monthly Spending\n  * If client's portfolio value exceeds this, adjust "
                 f"spending by {fmt_pct(up_adj_pct)} to {fmt_money(up_adj_month)}/month or {fmt_money(up_adj_year)}/year"
             )
             st.markdown(
-                f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Current Monthly Spending\n  * If client's portfolio value falls below this, adjust "
+                f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Initial Monthly Spending\n  * If client's portfolio value falls below this, adjust "
                 f"spending by {fmt_pct(low_adj_pct)} to {fmt_money(low_adj_month)}/month or {fmt_money(low_adj_year)}/year"
             )
         else:
             st.markdown(
-                f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Current Monthly Spending."
+                f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Initial Monthly Spending."
             )
             st.markdown(
-                f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Current Monthly Spending."
+                f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Initial Monthly Spending."
             )
 
     except Exception as e:
@@ -1089,7 +1088,7 @@ elif st.sidebar.button(
         verbose=True,
         on_progress=on_progress,
         on_status=on_status,
-        initial_spending_override=fixed_initial_spending if failsafe_mode else None,
+        initial_spending_override=initial_monthly_spending,
         disable_guardrails=failsafe_mode,
     )
 
