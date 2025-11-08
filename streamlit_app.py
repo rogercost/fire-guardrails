@@ -31,6 +31,57 @@ if "spending_cap_option" not in st.session_state:
     st.session_state["spending_cap_option"] = "Unlimited"
 if "spending_floor_option" not in st.session_state:
     st.session_state["spending_floor_option"] = "Unlimited"
+if "cashflows" not in st.session_state:
+    st.session_state["cashflows"] = []
+
+
+# Helpers for cashflow management
+def _sanitize_cashflows(raw_cashflows):
+    sanitized = []
+    for flow in raw_cashflows or []:
+        try:
+            start = int(flow.get("start_month", 0))
+            end = int(flow.get("end_month", 0))
+            amount = float(flow.get("amount", 0.0))
+        except (AttributeError, TypeError, ValueError):
+            continue
+
+        if end < start:
+            continue
+
+        sanitized.append({
+            "start_month": start,
+            "end_month": end,
+            "amount": amount,
+        })
+    return sanitized
+
+
+def _cashflows_to_tuple(cashflows):
+    return tuple((cf["start_month"], cf["end_month"], cf["amount"]) for cf in cashflows)
+
+
+def _clear_cashflow_widget_state(start_idx: int = 0) -> None:
+    """Remove cached widget values for cashflows starting from ``start_idx``."""
+
+    prefixes = (
+        "cf_start_",
+        "cf_end_",
+        "cf_amount_",
+        "cf_label_",
+    )
+
+    keys_to_drop = []
+    for key in list(st.session_state.keys()):
+        for prefix in prefixes:
+            if key.startswith(prefix):
+                suffix = key[len(prefix) :]
+                if suffix.isdigit() and int(suffix) >= start_idx:
+                    keys_to_drop.append(key)
+                break
+
+    for key in keys_to_drop:
+        del st.session_state[key]
 
 
 # Sidebar for inputs
@@ -47,6 +98,11 @@ start_date = st.sidebar.date_input(
          "In Guidance Mode, this defaults to today. Even if retirement is already underway, the guidance is forward looking from today.",
     disabled=is_guidance  # In Guidance Mode, this is fixed to today
 )
+# Retrieve advanced control defaults prior to widget rendering so downstream logic can use current selections.
+analysis_start_date = st.session_state.get("analysis_start_date", datetime.date(1871, 1, 1))
+adjustment_frequency = st.session_state.get("adjustment_frequency", "Monthly")
+
+# Numeric Inputs
 retirement_duration_months = st.sidebar.number_input(
     "Retirement Duration (months)",
     value=360,
@@ -55,17 +111,6 @@ retirement_duration_months = st.sidebar.number_input(
     step=12,
     help="Length of retirement in months.\n\nIn Guidance Mode, this should be the remaining number of months, if retirement is already underway."
 )
-analysis_start_date = st.sidebar.date_input(
-    "Historical Analysis Start Date",
-    value=datetime.date(1871, 1, 1),
-    min_value=datetime.date(1871, 1, 1),
-    max_value=datetime.date.today(),
-    help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nNote that when running historical "
-         "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
-         "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!"
-)
-
-# Numeric Inputs
 initial_value = st.sidebar.number_input(
     "Initial Portfolio Value",
     value=1_000_000, min_value=100_000, step=100_000,
@@ -88,6 +133,85 @@ stock_pct = st.sidebar.slider(
     help="Fraction of the portfolio allocated to US stocks; remainder to 10Y treasuries."
 )
 
+# Ensure widget defaults for existing cashflows remain synchronized prior to rendering inputs
+def _ensure_cashflow_widget_state(idx: int, flow: dict) -> None:
+    start_key = f"cf_start_{idx}"
+    end_key = f"cf_end_{idx}"
+    amount_key = f"cf_amount_{idx}"
+    label_key = f"cf_label_{idx}"
+
+    default_start = int(flow.get("start_month", 0))
+    default_end = int(flow.get("end_month", default_start))
+    default_amount = float(flow.get("amount", 0.0))
+    default_label = str(flow.get("label") or f"Cashflow {idx + 1}")
+
+    if start_key not in st.session_state:
+        st.session_state[start_key] = default_start
+
+    if end_key not in st.session_state:
+        st.session_state[end_key] = max(default_end, st.session_state[start_key])
+    elif st.session_state[end_key] < st.session_state[start_key]:
+        st.session_state[end_key] = st.session_state[start_key]
+
+    if amount_key not in st.session_state:
+        st.session_state[amount_key] = default_amount
+
+    if label_key not in st.session_state or not str(st.session_state[label_key]).strip():
+        st.session_state[label_key] = default_label
+
+
+def _sync_cashflows_from_widgets() -> None:
+    flows = st.session_state.get("cashflows")
+    if not flows:
+        return
+
+    for idx, flow in enumerate(flows):
+        start_key = f"cf_start_{idx}"
+        end_key = f"cf_end_{idx}"
+        amount_key = f"cf_amount_{idx}"
+        label_key = f"cf_label_{idx}"
+
+        try:
+            start_val = int(st.session_state.get(start_key, flow.get("start_month", 0)))
+        except (TypeError, ValueError):
+            start_val = int(flow.get("start_month", 0))
+
+        try:
+            end_val = int(st.session_state.get(end_key, flow.get("end_month", start_val)))
+        except (TypeError, ValueError):
+            end_val = int(flow.get("end_month", start_val))
+
+        if end_val < start_val:
+            end_val = start_val
+
+        try:
+            amount_val = float(st.session_state.get(amount_key, flow.get("amount", 0.0)))
+        except (TypeError, ValueError):
+            amount_val = float(flow.get("amount", 0.0))
+
+        label_raw = st.session_state.get(label_key, flow.get("label") or f"Cashflow {idx + 1}")
+        label_val = str(label_raw).strip() or f"Cashflow {idx + 1}"
+
+        st.session_state[start_key] = start_val
+        st.session_state[end_key] = end_val
+        st.session_state[amount_key] = amount_val
+        st.session_state[label_key] = label_val
+
+        flows[idx] = {
+            "start_month": start_val,
+            "end_month": end_val,
+            "amount": amount_val,
+            "label": label_val,
+        }
+
+
+cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 201, 5)]
+floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 24, -5)]
+
+_sync_cashflows_from_widgets()
+
+cashflows = _sanitize_cashflows(st.session_state.get("cashflows"))
+
 # Compute Retirement End Date for Simulation Mode from duration
 computed_end_date = (pd.to_datetime(start_date) + pd.DateOffset(months=int(retirement_duration_months) - 1)).date() if not is_guidance else None
 
@@ -101,6 +225,7 @@ iwr_params = {
     'stock_pct': float(stock_pct),
     # Use current target_success_rate if available, otherwise default of 0.90
     'desired_success_rate': float(st.session_state.get('target_success_rate', 0.90)),
+    'cashflows': _cashflows_to_tuple(cashflows),
 }
 iwr_label_suffix = ""
 try:
@@ -135,7 +260,8 @@ try:
             stock_pct=iwr_params['stock_pct'],
             tolerance=0.001,
             max_iterations=50,
-            verbose=False
+            verbose=False,
+            cashflows=cashflows,
         )
         st.session_state['iwr_value'] = float(res['withdrawal_rate']) if res['withdrawal_rate'] is not None else None
         st.session_state['iwr_params'] = iwr_params
@@ -153,8 +279,9 @@ target_success_rate = st.sidebar.slider(
     help="Desired probability of success that will be used to select an initial withdrawal rate.\n\nThe initial "
          "withdrawal rate will be the rate at which fixed withdrawals over all periods of time with length = the "
          "configured retirement period length, between the Historical Analysis Start Date and the Retirement Start "
-         "Date, end with >0 values this percent of the time.\n\nSetting this higher is more aggressive, and increases "
-         "the probability that your first adjustment will be a decrease as opposed to an increase in spending.",
+         "Date, end with >0 values this percent of the time.\n\nSetting this higher, e.g. 0.80-0.99, is more conservative: "
+         "lower initial spending, lower chance of adjustment; setting this lower is more aggressive, 0.75-0.60 provides higher "
+         "initial spending, higher chance of adjustment.",
     key="target_success_rate"
 )
 # Compute dynamic labels for Guardrail Success Rates showing initial (first period) PVs
@@ -170,6 +297,7 @@ try:
         'upper_sr': float(st.session_state.get("upper_guardrail_success", 1.00)),
         'lower_sr': float(st.session_state.get("lower_guardrail_success", 0.75)),
         'iwr': float(st.session_state.get('iwr_value')) if st.session_state.get('iwr_value') is not None else None,
+        'cashflows': _cashflows_to_tuple(cashflows),
     }
 
     if ('guardrail_params' not in st.session_state) or (st.session_state['guardrail_params'] != gr_params):
@@ -209,7 +337,8 @@ try:
             stock_pct=gr_params['stock_pct'],
             tolerance=0.001,
             max_iterations=50,
-            verbose=False
+            verbose=False,
+            cashflows=cashflows,
         )
         lower_res = utils.get_wr_for_fixed_success_rate(
             df=shiller_df,
@@ -221,7 +350,8 @@ try:
             stock_pct=gr_params['stock_pct'],
             tolerance=0.001,
             max_iterations=50,
-            verbose=False
+            verbose=False,
+            cashflows=cashflows,
         )
 
         upper_wr = float(upper_res['withdrawal_rate']) if upper_res['withdrawal_rate'] is not None else None
@@ -291,35 +421,6 @@ adjustment_threshold = st.sidebar.slider(
     disabled=is_guidance  # In Guidance Mode, single-run snapshot ignores threshold
 )
 
-adjustment_frequency = st.sidebar.selectbox(
-    "Adjustment Frequency",
-    options=["Monthly", "Quarterly", "Biannually", "Annually"],
-    index=0,
-    help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
-         "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January)."
-)
-
-cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(105, 251, 5)]
-floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(95, 24, -5)]
-
-with st.sidebar.expander("Advanced Controls"):
-    st.markdown(
-        "Configure optional limits that cap increases or decreases suggested by the guardrail strategy."
-    )
-    st.selectbox(
-        "Spending Cap",
-        options=cap_options,
-        key="spending_cap_option",
-        help="Maximum spending level as a percent of the initial monthly spending."
-    )
-    st.selectbox(
-        "Spending Floor",
-        options=floor_options,
-        key="spending_floor_option",
-        help="Minimum spending level as a percent of the initial monthly spending."
-    )
-
-
 def _relative_option_to_multiplier(option: str):
     if option == "Unlimited":
         return None
@@ -348,6 +449,7 @@ sim_params = {
     'adjustment_frequency': adjustment_frequency,
     'spending_cap_multiplier': spending_cap_multiplier,
     'spending_floor_multiplier': spending_floor_multiplier,
+    'cashflows': _cashflows_to_tuple(cashflows),
 }
 last_run_params = st.session_state.get('last_run_params')
 dirty = last_run_params is not None and last_run_params != sim_params
@@ -464,6 +566,32 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         row=2,
         col=1
     )
+    if 'Net_Cashflow' in results_df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=results_df['Date'],
+                y=results_df['Net_Cashflow'],
+                mode='lines',
+                name='Net Cashflow',
+                line=dict(color='#17becf', dash='dot'),
+                hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            ),
+            row=2,
+            col=1
+        )
+    if 'Total_Income' in results_df.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=results_df['Date'],
+                y=results_df['Total_Income'],
+                mode='lines',
+                name='Total Income',
+                line=dict(color='#bcbd22'),
+                hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            ),
+            row=2,
+            col=1
+        )
     fig.add_trace(
         go.Scatter(
             x=results_df['Date'],
@@ -547,7 +675,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         col=1
     )
     fig.update_yaxes(
-        title_text='Withdrawal ($/month)',
+        title_text='Withdrawals & Cashflows ($/month)',
         tickprefix='$',
         tickformat=',.0f',
         automargin=True,
@@ -560,11 +688,22 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
 
     total_fixed = float(results_df['Fixed_WR_Withdrawal'].sum()) if 'Fixed_WR_Withdrawal' in results_df.columns else float(init_withdrawal) * len(results_df)
     total_guardrails = float(results_df['Withdrawal'].sum())
-    diff_ratio = (total_guardrails - total_fixed) / total_fixed if total_fixed else 0.0
+    total_cashflow = float(results_df['Net_Cashflow'].sum()) if 'Net_Cashflow' in results_df.columns else 0.0
+    total_income_guardrails = float(results_df['Total_Income'].sum()) if 'Total_Income' in results_df.columns else total_guardrails + total_cashflow
+    total_income_fixed = float(results_df['Fixed_WR_Total_Income'].sum()) if 'Fixed_WR_Total_Income' in results_df.columns else total_fixed + total_cashflow
+    withdrawal_diff_ratio = (total_guardrails - total_fixed) / total_fixed if total_fixed else None
+    income_diff_ratio = (total_income_guardrails - total_income_fixed) / total_income_fixed if total_income_fixed else None
 
-    withdrawals = results_df['Withdrawal'].astype(float) if 'Withdrawal' in results_df else pd.Series(dtype=float)
-    min_withdrawal = float(withdrawals.min()) if not withdrawals.empty else 0.0
-    max_withdrawal = float(withdrawals.max()) if not withdrawals.empty else 0.0
+    if 'Total_Income' in results_df.columns:
+        income_series = results_df['Total_Income'].astype(float)
+    else:
+        income_series = results_df['Withdrawal'].astype(float) if 'Withdrawal' in results_df.columns else pd.Series(dtype=float)
+        if 'Net_Cashflow' in results_df.columns and not income_series.empty:
+            income_series = income_series + results_df['Net_Cashflow'].astype(float)
+
+    start_income = float(income_series.iloc[0]) if not income_series.empty else None
+    min_income = float(income_series.min()) if not income_series.empty else None
+    max_income = float(income_series.max()) if not income_series.empty else None
 
     def _longest_run(values, target):
         longest = 0
@@ -577,26 +716,144 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
                 current = 0
         return longest
 
-    min_streak = _longest_run(withdrawals, min_withdrawal) if not withdrawals.empty else 0
-    max_streak = _longest_run(withdrawals, max_withdrawal) if not withdrawals.empty else 0
+    min_streak = _longest_run(income_series, min_income) if not income_series.empty else 0
+    max_streak = _longest_run(income_series, max_income) if not income_series.empty else 0
 
-    def _fmt_change(new_value):
-        if init_withdrawal == 0:
+    def _fmt_currency(value):
+        if value is None or not np.isfinite(value):
             return "N/A"
-        return f"{(new_value / init_withdrawal - 1.0):+.0%}"
+        return f"${value:,.0f}"
 
-    def _fmt_months(months):
-        return f"{months} month{'s' if months != 1 else ''}"
+    def _fmt_pct_diff(new_value, baseline):
+        if new_value is None or baseline in (None, 0):
+            return "N/A"
+        return f"{(new_value / baseline - 1.0):+.0%}"
 
-    st.markdown(f"Total Withdrawal (Fixed): ${total_fixed:,.0f}")
-    st.markdown(f"Total Withdrawal (Using Guardrails): ${total_guardrails:,.0f}")
-    st.markdown(f"Difference: {diff_ratio:+.0%}")
-    st.markdown(
-        f"Min Withdrawal: ${min_withdrawal:,.0f} ({_fmt_change(min_withdrawal)}) for {_fmt_months(min_streak)}"
+    summary_rows = [
+        {
+            "Metric": "Total Withdrawal",
+            "Fixed": _fmt_currency(total_fixed),
+            "Guardrails": _fmt_currency(total_guardrails),
+            "% Diff": _fmt_pct_diff(total_guardrails, total_fixed) if withdrawal_diff_ratio is not None else "N/A",
+        },
+        {
+            "Metric": "Total Income",
+            "Fixed": _fmt_currency(total_income_fixed),
+            "Guardrails": _fmt_currency(total_income_guardrails),
+            "% Diff": _fmt_pct_diff(total_income_guardrails, total_income_fixed) if income_diff_ratio is not None else "N/A",
+        },
+    ]
+
+    st.table(pd.DataFrame(summary_rows).set_index("Metric"))
+
+    income_rows = [
+        {
+            "Metric": "Start Income",
+            "Monthly": _fmt_currency(start_income),
+            "% Diff": "—",
+            "Duration (months)": "—",
+        },
+        {
+            "Metric": "Min Income",
+            "Monthly": _fmt_currency(min_income),
+            "% Diff": _fmt_pct_diff(min_income, start_income),
+            "Duration (months)": f"{min_streak}" if min_streak else "—",
+        },
+        {
+            "Metric": "Max Income",
+            "Monthly": _fmt_currency(max_income),
+            "% Diff": _fmt_pct_diff(max_income, start_income),
+            "Duration (months)": f"{max_streak}" if max_streak else "—",
+        },
+    ]
+
+    st.table(pd.DataFrame(income_rows).set_index("Metric"))
+
+
+with st.sidebar.expander("Advanced Controls"):
+    analysis_start_date = st.date_input(
+        "Historical Analysis Start Date",
+        value=analysis_start_date,
+        min_value=datetime.date(1871, 1, 1),
+        max_value=datetime.date.today(),
+        help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nNote that when running historical "
+             "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
+             "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!",
+        key="analysis_start_date",
     )
-    st.markdown(
-        f"Max Withdrawal: ${max_withdrawal:,.0f} ({_fmt_change(max_withdrawal)}) for {_fmt_months(max_streak)}"
+
+    adjustment_options = ["Monthly", "Quarterly", "Biannually", "Annually"]
+    default_adjustment_index = (
+        adjustment_options.index(adjustment_frequency)
+        if adjustment_frequency in adjustment_options
+        else 0
     )
+    adjustment_frequency = st.selectbox(
+        "Adjustment Frequency",
+        options=adjustment_options,
+        index=default_adjustment_index,
+        help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
+             "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January).",
+        key="adjustment_frequency",
+    )
+
+    st.selectbox(
+        "Spending Cap",
+        options=cap_options,
+        key="spending_cap_option",
+        help="Maximum spending level as a percent of the initial monthly spending.",
+    )
+    st.selectbox(
+        "Spending Floor",
+        options=floor_options,
+        key="spending_floor_option",
+        help="Minimum spending level as a percent of the initial monthly spending.",
+    )
+
+    if st.button("Add Recurring Cashflow", key="add_cashflow_btn"):
+        st.session_state["cashflows"].append({
+            "start_month": 0,
+            "end_month": 0,
+            "amount": 0.0,
+            "label": f"Cashflow {len(st.session_state['cashflows']) + 1}",
+        })
+        st.rerun()
+
+    for idx, flow in enumerate(st.session_state["cashflows"]):
+        _ensure_cashflow_widget_state(idx, flow)
+
+        name_col, remove_col = st.columns([1, 0.15])
+        label_key = f"cf_label_{idx}"
+        name_col.text_input(
+            "Cashflow Name",
+            key=label_key,
+            label_visibility="collapsed",
+            placeholder="Cashflow name",
+        )
+        if remove_col.button("✕", key=f"cf_remove_{idx}"):
+            st.session_state["cashflows"].pop(idx)
+            _clear_cashflow_widget_state(idx)
+            st.rerun()
+
+        col_start, col_end, col_amount = st.columns(3)
+        col_start.number_input(
+            "Start Month",
+            min_value=0,
+            step=1,
+            key=f"cf_start_{idx}",
+        )
+        col_end.number_input(
+            "End Month",
+            min_value=0,
+            step=1,
+            key=f"cf_end_{idx}",
+        )
+        col_amount.number_input(
+            "Amount ($/mo)",
+            step=50.0,
+            format="%0.2f",
+            key=f"cf_amount_{idx}",
+        )
 
 
 # When inputs change, visually dim and surround the main area with a red border
@@ -648,6 +905,7 @@ if is_guidance:
             adjustment_frequency=adjustment_frequency,
             spending_cap=spending_cap_multiplier,
             spending_floor=spending_floor_multiplier,
+            cashflows=cashflows,
             verbose=False
         )
 
@@ -661,6 +919,7 @@ if is_guidance:
         start_wr = st.session_state.get("iwr_value", snap.get("target_withdrawal_rate"))
         start_month = snap.get("target_monthly_spending")
         start_year = (start_month * 12.0) if start_month is not None else None
+        start_net_withdrawal = snap.get("target_monthly_withdrawal")
 
         upper_val = snap.get("upper_guardrail_value")
         lower_val = snap.get("lower_guardrail_value")
@@ -675,6 +934,7 @@ if is_guidance:
 
         adjustments_allowed = snap.get("adjustments_allowed", True)
         next_adjustment_date = snap.get("next_adjustment_date")
+        cashflow_month0 = snap.get("current_cashflow")
 
         def fmt_month(ts):
             if ts is None or pd.isna(ts):
@@ -692,12 +952,16 @@ if is_guidance:
                 f"The next eligible adjustment month is {fmt_month(next_adjustment_date)}."
             )
 
-        st.markdown(
-            f"* **Target Withdrawal Rate:** {start_wr*100:.2f}% ({fmt_money(start_month)}/month or {fmt_money(start_year)}/year "
-            f"based on the Initial Portfolio Value)"
-            if start_wr is not None else
-            "**Starting Withdrawal Rate:** N/A"
-        )
+        if start_wr is not None:
+            st.markdown(
+                f"* **Target Withdrawal Rate:** {start_wr*100:.2f}% "
+                f"({fmt_money(start_month)}/month or {fmt_money(start_year)}/year total spending based on the Initial Portfolio Value) "
+                f"— portfolio withdrawal after cashflows: {fmt_money(start_net_withdrawal)}/month"
+            )
+        else:
+            st.markdown("**Starting Withdrawal Rate:** N/A")
+
+        st.markdown(f"* **Month 1 Cashflows:** {fmt_money(cashflow_month0)}/month")
         if adjustments_allowed:
             st.markdown(
                 f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Current Monthly Spending\n  * If client's portfolio value exceeds this, adjust "
@@ -766,6 +1030,7 @@ elif st.sidebar.button(
         adjustment_frequency=adjustment_frequency,
         spending_cap=spending_cap_multiplier,
         spending_floor=spending_floor_multiplier,
+        cashflows=cashflows,
         verbose=True,
         on_progress=on_progress,
         on_status=on_status
