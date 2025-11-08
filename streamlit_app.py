@@ -75,6 +75,11 @@ start_date = st.sidebar.date_input(
          "In Guidance Mode, this defaults to today. Even if retirement is already underway, the guidance is forward looking from today.",
     disabled=is_guidance  # In Guidance Mode, this is fixed to today
 )
+# Retrieve advanced control defaults prior to widget rendering so downstream logic can use current selections.
+analysis_start_date = st.session_state.get("analysis_start_date", datetime.date(1871, 1, 1))
+adjustment_frequency = st.session_state.get("adjustment_frequency", "Monthly")
+
+# Numeric Inputs
 retirement_duration_months = st.sidebar.number_input(
     "Retirement Duration (months)",
     value=360,
@@ -83,17 +88,6 @@ retirement_duration_months = st.sidebar.number_input(
     step=12,
     help="Length of retirement in months.\n\nIn Guidance Mode, this should be the remaining number of months, if retirement is already underway."
 )
-analysis_start_date = st.sidebar.date_input(
-    "Historical Analysis Start Date",
-    value=datetime.date(1871, 1, 1),
-    min_value=datetime.date(1871, 1, 1),
-    max_value=datetime.date.today(),
-    help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nNote that when running historical "
-         "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
-         "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!"
-)
-
-# Numeric Inputs
 initial_value = st.sidebar.number_input(
     "Initial Portfolio Value",
     value=1_000_000, min_value=100_000, step=100_000,
@@ -401,14 +395,6 @@ adjustment_threshold = st.sidebar.slider(
          "a question of whether frequent adjustments are acceptable and administratively feasible for the client.\n\n"
          "Not used in Guidance Mode, which will always show spending adjustment suggestions, no matter how small.",
     disabled=is_guidance  # In Guidance Mode, single-run snapshot ignores threshold
-)
-
-adjustment_frequency = st.sidebar.selectbox(
-    "Adjustment Frequency",
-    options=["Monthly", "Quarterly", "Biannually", "Annually"],
-    index=0,
-    help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
-         "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January)."
 )
 
 def _relative_option_to_multiplier(option: str):
@@ -761,6 +747,32 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
 
 
 with st.sidebar.expander("Advanced Controls"):
+    analysis_start_date = st.date_input(
+        "Historical Analysis Start Date",
+        value=analysis_start_date,
+        min_value=datetime.date(1871, 1, 1),
+        max_value=datetime.date.today(),
+        help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nNote that when running historical "
+             "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
+             "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!",
+        key="analysis_start_date",
+    )
+
+    adjustment_options = ["Monthly", "Quarterly", "Biannually", "Annually"]
+    default_adjustment_index = (
+        adjustment_options.index(adjustment_frequency)
+        if adjustment_frequency in adjustment_options
+        else 0
+    )
+    adjustment_frequency = st.selectbox(
+        "Adjustment Frequency",
+        options=adjustment_options,
+        index=default_adjustment_index,
+        help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
+             "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January).",
+        key="adjustment_frequency",
+    )
+
     st.selectbox(
         "Spending Cap",
         options=cap_options,
