@@ -681,11 +681,19 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
     total_cashflow = float(results_df['Cashflow'].sum()) if 'Cashflow' in results_df.columns else 0.0
     total_income_guardrails = float(results_df['Total_Income'].sum()) if 'Total_Income' in results_df.columns else total_guardrails + total_cashflow
     total_income_fixed = float(results_df['Fixed_WR_Total_Income'].sum()) if 'Fixed_WR_Total_Income' in results_df.columns else total_fixed + total_cashflow
-    diff_ratio = (total_guardrails - total_fixed) / total_fixed if total_fixed else 0.0
+    withdrawal_diff_ratio = (total_guardrails - total_fixed) / total_fixed if total_fixed else None
+    income_diff_ratio = (total_income_guardrails - total_income_fixed) / total_income_fixed if total_income_fixed else None
 
-    withdrawals = results_df['Withdrawal'].astype(float) if 'Withdrawal' in results_df else pd.Series(dtype=float)
-    min_withdrawal = float(withdrawals.min()) if not withdrawals.empty else 0.0
-    max_withdrawal = float(withdrawals.max()) if not withdrawals.empty else 0.0
+    if 'Total_Income' in results_df.columns:
+        income_series = results_df['Total_Income'].astype(float)
+    else:
+        income_series = results_df['Withdrawal'].astype(float) if 'Withdrawal' in results_df.columns else pd.Series(dtype=float)
+        if 'Cashflow' in results_df.columns and not income_series.empty:
+            income_series = income_series + results_df['Cashflow'].astype(float)
+
+    start_income = float(income_series.iloc[0]) if not income_series.empty else None
+    min_income = float(income_series.min()) if not income_series.empty else None
+    max_income = float(income_series.max()) if not income_series.empty else None
 
     def _longest_run(values, target):
         longest = 0
@@ -698,32 +706,58 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
                 current = 0
         return longest
 
-    min_streak = _longest_run(withdrawals, min_withdrawal) if not withdrawals.empty else 0
-    max_streak = _longest_run(withdrawals, max_withdrawal) if not withdrawals.empty else 0
+    min_streak = _longest_run(income_series, min_income) if not income_series.empty else 0
+    max_streak = _longest_run(income_series, max_income) if not income_series.empty else 0
 
-    def _fmt_change(new_value):
-        if init_withdrawal == 0:
+    def _fmt_currency(value):
+        if value is None or not np.isfinite(value):
             return "N/A"
-        return f"{(new_value / init_withdrawal - 1.0):+.0%}"
+        return f"${value:,.0f}"
 
-    def _fmt_months(months):
-        return f"{months} month{'s' if months != 1 else ''}"
+    def _fmt_pct_diff(new_value, baseline):
+        if new_value is None or baseline in (None, 0):
+            return "N/A"
+        return f"{(new_value / baseline - 1.0):+.0%}"
 
-    st.markdown(f"Total Withdrawal (Fixed): ${total_fixed:,.0f}")
-    st.markdown(f"Total Withdrawal (Using Guardrails): ${total_guardrails:,.0f}")
-    st.markdown(f"Difference: {diff_ratio:+.0%}")
-    if 'Cashflow' in results_df.columns:
-        st.markdown(f"Total Cashflow: ${total_cashflow:,.0f}")
-    if 'Total_Income' in results_df.columns:
-        st.markdown(f"Total Income (Guardrails): ${total_income_guardrails:,.0f}")
-    if 'Fixed_WR_Total_Income' in results_df.columns:
-        st.markdown(f"Total Income (Fixed WR): ${total_income_fixed:,.0f}")
-    st.markdown(
-        f"Min Withdrawal: ${min_withdrawal:,.0f} ({_fmt_change(min_withdrawal)}) for {_fmt_months(min_streak)}"
-    )
-    st.markdown(
-        f"Max Withdrawal: ${max_withdrawal:,.0f} ({_fmt_change(max_withdrawal)}) for {_fmt_months(max_streak)}"
-    )
+    summary_rows = [
+        {
+            "Metric": "Total Withdrawal",
+            "Fixed": _fmt_currency(total_fixed),
+            "Guardrails": _fmt_currency(total_guardrails),
+            "% Diff": _fmt_pct_diff(total_guardrails, total_fixed) if withdrawal_diff_ratio is not None else "N/A",
+        },
+        {
+            "Metric": "Total Income",
+            "Fixed": _fmt_currency(total_income_fixed),
+            "Guardrails": _fmt_currency(total_income_guardrails),
+            "% Diff": _fmt_pct_diff(total_income_guardrails, total_income_fixed) if income_diff_ratio is not None else "N/A",
+        },
+    ]
+
+    st.table(pd.DataFrame(summary_rows).set_index("Metric"))
+
+    income_rows = [
+        {
+            "Metric": "Start Income",
+            "Monthly": _fmt_currency(start_income),
+            "% Diff": "—",
+            "Duration (months)": "—",
+        },
+        {
+            "Metric": "Min Income",
+            "Monthly": _fmt_currency(min_income),
+            "% Diff": _fmt_pct_diff(min_income, start_income),
+            "Duration (months)": f"{min_streak}" if min_streak else "—",
+        },
+        {
+            "Metric": "Max Income",
+            "Monthly": _fmt_currency(max_income),
+            "% Diff": _fmt_pct_diff(max_income, start_income),
+            "Duration (months)": f"{max_streak}" if max_streak else "—",
+        },
+    ]
+
+    st.table(pd.DataFrame(income_rows).set_index("Metric"))
 
 
 with st.sidebar.expander("Advanced Controls"):
