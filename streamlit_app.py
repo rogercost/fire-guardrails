@@ -188,8 +188,8 @@ def _sync_cashflows_from_widgets() -> None:
         }
 
 
-cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(105, 251, 5)]
-floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(95, 24, -5)]
+cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 201, 5)]
+floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 24, -5)]
 
 _sync_cashflows_from_widgets()
 
