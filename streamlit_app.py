@@ -790,7 +790,6 @@ with st.sidebar.expander("Advanced Controls"):
         label_key = f"cf_label_{idx}"
         name_col.text_input(
             "Cashflow Name",
-            value=st.session_state.get(label_key, f"Cashflow {idx + 1}"),
             key=label_key,
             label_visibility="collapsed",
             placeholder="Cashflow name",
