@@ -280,16 +280,49 @@ try:
 except Exception:
     iwr_label_suffix = " (Initial WR: N/A)"
 target_success_label = f"Target Success Rate{iwr_label_suffix}"
-target_success_rate = st.sidebar.slider(
-    target_success_label, value=st.session_state.get("target_success_rate", 0.90), min_value=0.0, max_value=1.0, step=0.01,
-    help="Desired probability of success that will be used to select an initial withdrawal rate.\n\nThe initial "
-         "withdrawal rate will be the rate at which fixed withdrawals over all periods of time with length = the "
-         "configured retirement period length, between the Historical Analysis Start Date and the Retirement Start "
-         "Date, end with >0 values this percent of the time.\n\nSetting this higher, e.g. 0.80-0.99, is more conservative: "
-         "lower initial spending, lower chance of adjustment; setting this lower is more aggressive, 0.75-0.60 provides higher "
-         "initial spending, higher chance of adjustment.",
-    key="target_success_rate"
+failsafe_mode = st.sidebar.checkbox(
+    "Fixed Withdrawal Mode",
+    value=st.session_state.get("failsafe_mode", False),
+    help="Lock spending to a fixed dollar amount each month (no guardrail adjustments).",
+    key="failsafe_mode"
 )
+
+if failsafe_mode:
+    fallback_spending = st.session_state.get("fixed_initial_spending")
+    if fallback_spending is None:
+        if iwr is not None:
+            fallback_spending = float(initial_value) * float(iwr) / 12.0
+        else:
+            fallback_spending = float(initial_value) * 0.04 / 12.0
+    fixed_initial_spending = st.sidebar.number_input(
+        "Initial Monthly Spending",
+        value=float(fallback_spending),
+        min_value=0.0,
+        step=50.0,
+        help="Monthly spending amount to maintain throughout the simulation.",
+        key="fixed_initial_spending"
+    )
+else:
+    fixed_initial_spending = None
+
+if failsafe_mode and st.session_state.get("spending_cap_option") != "100%":
+    st.session_state["spending_cap_option"] = "100%"
+if failsafe_mode and st.session_state.get("spending_floor_option") != "100%":
+    st.session_state["spending_floor_option"] = "100%"
+
+if failsafe_mode:
+    target_success_rate = float(st.session_state.get("target_success_rate", 0.90))
+else:
+    target_success_rate = st.sidebar.slider(
+        target_success_label, value=st.session_state.get("target_success_rate", 0.90), min_value=0.0, max_value=1.0, step=0.01,
+        help="Desired probability of success that will be used to select an initial withdrawal rate.\n\nThe initial "
+             "withdrawal rate will be the rate at which fixed withdrawals over all periods of time with length = the "
+             "configured retirement period length, between the Historical Analysis Start Date and the Retirement Start "
+             "Date, end with >0 values this percent of the time.\n\nSetting this higher, e.g. 0.80-0.99, is more conservative: "
+             "lower initial spending, lower chance of adjustment; setting this lower is more aggressive, 0.75-0.60 provides higher "
+             "initial spending, higher chance of adjustment.",
+        key="target_success_rate"
+    )
 # Compute dynamic labels for Guardrail Success Rates showing initial (first period) PVs
 upper_label_suffix = ""
 lower_label_suffix = ""
@@ -379,61 +412,80 @@ except Exception:
 upper_guardrail_label = f"Upper Guardrail Success Rate{upper_label_suffix}"
 lower_guardrail_label = f"Lower Guardrail Success Rate{lower_label_suffix}"
 
-upper_guardrail_success = st.sidebar.slider(
-    upper_guardrail_label, value=st.session_state.get("upper_guardrail_success", 1.00), min_value=0.0, max_value=1.0, step=0.01,
-    help="The withdrawal rate used to calculate the upper guardrail portfolio value.\n\nThis is the value where the "
-         "current withdrawal amount, if held constant, will succeed this frequently or more, for all periods with "
-         "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
-         "simulation date.\n\nSetting this higher is more conservative, and will cause you to wait longer to increase "
-         "your spending when markets are up.",
-    key="upper_guardrail_success"
-)
-lower_guardrail_success = st.sidebar.slider(
-    lower_guardrail_label, value=st.session_state.get("lower_guardrail_success", 0.75), min_value=0.0, max_value=1.0, step=0.01,
-    help="The withdrawal rate used to calculate the lower guardrail portfolio value.\n\nThis is the value where the "
-         "current withdrawal amount, if held constant, will succeed this frequently or less, for all periods with "
-         "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
-         "simulation date.\n\nSetting this higher is more conservative, and will cause you to decrease your spending "
-         "sooner when markets are down.",
-    key="lower_guardrail_success"
-)
-upper_adjustment_fraction = st.sidebar.slider(
-    "Upper Adjustment Fraction", value=1.0, min_value=0.0, max_value=1.0, step=0.05,
-    help="How much to increase spending when we hit the upper guardrail.\n\nExpressed as a % of the distance between "
-         "the Upper Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the upper guardrail "
-         "represents 100% success and the target is 90%, setting this value to 50% means we go half the distance back "
-         "to the target, and our new withdrawal rate will be based on a 95% chance of success.\n\nSetting this higher "
-         "is more aggressive, and will cause you to make larger spending increases when you hit the upper guardrail."
-)
-lower_adjustment_fraction = st.sidebar.slider(
-    "Lower Adjustment Fraction", value=0.1, min_value=0.0, max_value=1.0, step=0.05,
-    help="How much to decrease spending when we hit the lower guardrail.\n\nExpressed as a % of the distance between "
-         "the Lower Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the lower guardrail "
-         "represents 70% success and the target is 90%, setting this value to 50% means we go half the distance back "
-         "to the target, and our new withdrawal rate will be based on an 80% chance of success.\n\nSetting this higher "
-         "is more conservative, and will cause you to make larger spending decreases when you hit the lower guardrail."
-)
+if failsafe_mode:
+    upper_guardrail_success = float(st.session_state.get("upper_guardrail_success", 1.00))
+    lower_guardrail_success = float(st.session_state.get("lower_guardrail_success", 0.75))
+    upper_adjustment_fraction = float(st.session_state.get("upper_adjustment_fraction", 1.0))
+    lower_adjustment_fraction = float(st.session_state.get("lower_adjustment_fraction", 0.1))
+    adjustment_threshold = float(st.session_state.get("adjustment_threshold", 0.0 if is_guidance else 0.05))
+    adjustment_frequency = st.session_state.get("adjustment_frequency", "Monthly")
+else:
+    upper_guardrail_success = st.sidebar.slider(
+        upper_guardrail_label, value=st.session_state.get("upper_guardrail_success", 1.00), min_value=0.0, max_value=1.0, step=0.01,
+        help="The withdrawal rate used to calculate the upper guardrail portfolio value.\n\nThis is the value where the "
+             "current withdrawal amount, if held constant, will succeed this frequently or more, for all periods with "
+             "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
+             "simulation date.\n\nSetting this higher is more conservative, and will cause you to wait longer to increase "
+             "your spending when markets are up.",
+        key="upper_guardrail_success"
+    )
+    lower_guardrail_success = st.sidebar.slider(
+        lower_guardrail_label, value=st.session_state.get("lower_guardrail_success", 0.75), min_value=0.0, max_value=1.0, step=0.01,
+        help="The withdrawal rate used to calculate the lower guardrail portfolio value.\n\nThis is the value where the "
+             "current withdrawal amount, if held constant, will succeed this frequently or less, for all periods with "
+             "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
+             "simulation date.\n\nSetting this higher is more conservative, and will cause you to decrease your spending "
+             "sooner when markets are down.",
+        key="lower_guardrail_success"
+    )
+    upper_adjustment_fraction = st.sidebar.slider(
+        "Upper Adjustment Fraction", value=1.0, min_value=0.0, max_value=1.0, step=0.05,
+        help="How much to increase spending when we hit the upper guardrail.\n\nExpressed as a % of the distance between "
+             "the Upper Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the upper guardrail "
+             "represents 100% success and the target is 90%, setting this value to 50% means we go half the distance back "
+             "to the target, and our new withdrawal rate will be based on a 95% chance of success.\n\nSetting this higher "
+             "is more aggressive, and will cause you to make larger spending increases when you hit the upper guardrail.",
+        key="upper_adjustment_fraction"
+    )
+    lower_adjustment_fraction = st.sidebar.slider(
+        "Lower Adjustment Fraction", value=0.1, min_value=0.0, max_value=1.0, step=0.05,
+        help="How much to decrease spending when we hit the lower guardrail.\n\nExpressed as a % of the distance between "
+             "the Lower Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the lower guardrail "
+             "represents 70% success and the target is 90%, setting this value to 50% means we go half the distance back "
+             "to the target, and our new withdrawal rate will be based on an 80% chance of success.\n\nSetting this higher "
+             "is more conservative, and will cause you to make larger spending decreases when you hit the lower guardrail.",
+        key="lower_adjustment_fraction"
+    )
 
-adjustment_threshold = st.sidebar.slider(
-    "Adjustment Threshold (e.g., 0.05 for 5%)",
-    value=0.0 if is_guidance else 0.05,
-    min_value=0.0, max_value=0.2, step=0.01,
-    help="The minimum percent difference between our new spending and our prior spending, before we make a change.\n\n"
-         "Even if we hit a guardrail, we may elect to set this to 5% to avoid making lots of small adjustments. Set it "
-         "to 0% to disable it and allow all guardrail hits to trigger spending adjustments.\n\nSetting this higher is "
-         "neither aggressive nor conservative, since it impacts spending increases as well as decreases. It is purely "
-         "a question of whether frequent adjustments are acceptable and administratively feasible for the client.\n\n"
-         "Not used in Guidance Mode, which will always show spending adjustment suggestions, no matter how small.",
-    disabled=is_guidance  # In Guidance Mode, single-run snapshot ignores threshold
-)
+    adjustment_threshold = st.sidebar.slider(
+        "Adjustment Threshold (e.g., 0.05 for 5%)",
+        value=0.0 if is_guidance else 0.05,
+        min_value=0.0, max_value=0.2, step=0.01,
+        help="The minimum percent difference between our new spending and our prior spending, before we make a change.\n\n"
+             "Even if we hit a guardrail, we may elect to set this to 5% to avoid making lots of small adjustments. Set it "
+             "to 0% to disable it and allow all guardrail hits to trigger spending adjustments.\n\nSetting this higher is "
+             "neither aggressive nor conservative, since it impacts spending increases as well as decreases. It is purely "
+             "a question of whether frequent adjustments are acceptable and administratively feasible for the client.\n\n"
+             "Not used in Guidance Mode, which will always show spending adjustment suggestions, no matter how small.",
+        disabled=is_guidance,  # In Guidance Mode, single-run snapshot ignores threshold
+        key="adjustment_threshold"
+    )
 
-adjustment_frequency = st.sidebar.selectbox(
-    "Adjustment Frequency",
-    options=["Monthly", "Quarterly", "Biannually", "Annually"],
-    index=0,
-    help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
-         "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January)."
-)
+    frequency_options = ["Monthly", "Quarterly", "Biannually", "Annually"]
+    default_frequency = st.session_state.get("adjustment_frequency", "Monthly")
+    try:
+        default_index = frequency_options.index(default_frequency)
+    except ValueError:
+        default_index = 0
+
+    adjustment_frequency = st.sidebar.selectbox(
+        "Adjustment Frequency",
+        options=frequency_options,
+        index=default_index,
+        help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
+             "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January).",
+        key="adjustment_frequency"
+    )
 
 def _relative_option_to_multiplier(option: str):
     if option == "Unlimited":
@@ -446,6 +498,10 @@ def _relative_option_to_multiplier(option: str):
 
 spending_cap_multiplier = _relative_option_to_multiplier(st.session_state.get("spending_cap_option"))
 spending_floor_multiplier = _relative_option_to_multiplier(st.session_state.get("spending_floor_option"))
+
+if failsafe_mode:
+    spending_cap_multiplier = 1.0
+    spending_floor_multiplier = 1.0
 
 # Build current simulation parameters dict for change detection
 sim_params = {
@@ -464,6 +520,8 @@ sim_params = {
     'spending_cap_multiplier': spending_cap_multiplier,
     'spending_floor_multiplier': spending_floor_multiplier,
     'cashflows': _cashflows_to_tuple(cashflows),
+    'failsafe_mode': bool(failsafe_mode),
+    'fixed_initial_spending': float(fixed_initial_spending) if fixed_initial_spending is not None else None,
 }
 last_run_params = st.session_state.get('last_run_params')
 dirty = last_run_params is not None and last_run_params != sim_params
@@ -496,12 +554,18 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         st.info("No simulation results to display.")
         return
 
-    show_guardrail_hits = st.checkbox(
-        "Show guardrail hit markers",
-        value=True,
-        help="Toggle vertical dotted lines at guardrail hits.",
-        key="show_guardrail_hits"
-    )
+    failsafe_mode = st.session_state.get("failsafe_mode", False)
+
+    if failsafe_mode:
+        show_guardrail_hits = False
+        st.info("Fixed Withdrawal Mode is active; guardrail controls and adjustments are bypassed.")
+    else:
+        show_guardrail_hits = st.checkbox(
+            "Show guardrail hit markers",
+            value=True,
+            help="Toggle vertical dotted lines at guardrail hits.",
+            key="show_guardrail_hits"
+        )
 
     init_withdrawal = float(results_df['Withdrawal'].iloc[0]) if not results_df.empty else 0.0
 
@@ -529,32 +593,33 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             col=1
         )
 
-    fig.add_trace(
-        go.Scatter(
-            x=results_df['Date'],
-            y=results_df['Upper_Guardrail'],
-            mode='lines',
-            name='Upper Guardrail',
-            line=dict(color='#2ca02c'),
-            opacity=0.45,
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-        ),
-        row=1,
-        col=1
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=results_df['Date'],
-            y=results_df['Lower_Guardrail'],
-            mode='lines',
-            name='Lower Guardrail',
-            line=dict(color='#d62728'),
-            opacity=0.45,
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-        ),
-        row=1,
-        col=1
-    )
+    if not failsafe_mode:
+        fig.add_trace(
+            go.Scatter(
+                x=results_df['Date'],
+                y=results_df['Upper_Guardrail'],
+                mode='lines',
+                name='Upper Guardrail',
+                line=dict(color='#2ca02c'),
+                opacity=0.45,
+                hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            ),
+            row=1,
+            col=1
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=results_df['Date'],
+                y=results_df['Lower_Guardrail'],
+                mode='lines',
+                name='Lower Guardrail',
+                line=dict(color='#d62728'),
+                opacity=0.45,
+                hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            ),
+            row=1,
+            col=1
+        )
     fig.add_trace(
         go.Scatter(
             x=results_df['Date'],
@@ -790,12 +855,14 @@ with st.sidebar.expander("Advanced Controls"):
         options=cap_options,
         key="spending_cap_option",
         help="Maximum spending level as a percent of the initial monthly spending.",
+        disabled=failsafe_mode,
     )
     st.selectbox(
         "Spending Floor",
         options=floor_options,
         key="spending_floor_option",
         help="Minimum spending level as a percent of the initial monthly spending.",
+        disabled=failsafe_mode,
     )
 
     if st.button("Add Recurring Cashflow", key="add_cashflow_btn"):
@@ -1021,7 +1088,9 @@ elif st.sidebar.button(
         cashflows=cashflows,
         verbose=True,
         on_progress=on_progress,
-        on_status=on_status
+        on_status=on_status,
+        initial_spending_override=fixed_initial_spending if failsafe_mode else None,
+        disable_guardrails=failsafe_mode,
     )
 
     # Cache results in session state for re-render without recomputation

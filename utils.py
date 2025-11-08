@@ -351,7 +351,9 @@ def get_guardrail_withdrawals(df, start_date, end_date,
                               cashflows=None,
                               verbose=False,
                               on_progress=None,
-                              on_status=None):
+                              on_status=None,
+                              initial_spending_override=None,
+                              disable_guardrails=False):
     """
     Creates a dataframe of withdrawals that follow an adaptive guardrail strategy.
 
@@ -361,6 +363,16 @@ def get_guardrail_withdrawals(df, start_date, end_date,
     3. If portfolio hits guardrails, adjust spending
     4. Only implement adjustment if it exceeds threshold (to avoid constant small changes)
     5. Optionally cap or floor the resulting spending relative to the initial monthly amount
+
+    Parameters
+    ----------
+    initial_spending_override : float, optional
+        If provided, overrides the initial monthly spending (and corresponding withdrawal rate)
+        instead of deriving it from ``target_success_rate``. Useful for fixed-withdrawal scenarios.
+    disable_guardrails : bool, optional
+        When True, skip all guardrail calculations and maintain the spending level at
+        ``initial_spending_override`` (or the baseline initial amount). Guardrail-related
+        diagnostics will be populated with NaN/disabled placeholders.
 
     Returns
     -------
@@ -411,7 +423,11 @@ def get_guardrail_withdrawals(df, start_date, end_date,
 
     # State variables
     current_portfolio_value = initial_value
-    previous_total_spending = initial_value * initial_wr / 12
+    if initial_spending_override is not None:
+        previous_total_spending = float(initial_spending_override)
+        initial_wr = (previous_total_spending * 12.0 / initial_value) if initial_value else 0.0
+    else:
+        previous_total_spending = initial_value * initial_wr / 12
     cap_amount = (
         previous_total_spending * float(spending_cap)
         if spending_cap is not None else None
@@ -471,7 +487,16 @@ def get_guardrail_withdrawals(df, start_date, end_date,
                 cashflow_schedule=schedule_slice,
             )['withdrawal_rate']
 
-        if not guardrail_depleted:
+        if disable_guardrails:
+            target_wr = initial_wr
+            upper_guardrail_value = np.nan
+            lower_guardrail_value = np.nan
+            spending_target = previous_total_spending
+            adjustment_made = False
+            guardrail_hit = "DISABLED"
+            percent_change = 0.0
+            adjustment_allowed = False
+        elif not guardrail_depleted:
             # Calculate 3 withdrawal rates: the target, and the upper and lower guardrail, based on the current portfolio
             # value and months remaining
             #
