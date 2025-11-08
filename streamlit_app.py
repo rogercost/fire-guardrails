@@ -364,6 +364,7 @@ if not is_guidance:
 upper_label_suffix = ""
 lower_label_suffix = ""
 try:
+    current_initial_spending = st.session_state.get("initial_monthly_spending")
     gr_params = {
         'start_date': pd.to_datetime(start_date),
         'duration_months': int(retirement_duration_months),
@@ -373,6 +374,7 @@ try:
         'upper_sr': float(st.session_state.get("upper_guardrail_success", 1.00)),
         'lower_sr': float(st.session_state.get("lower_guardrail_success", 0.75)),
         'iwr': float(st.session_state.get('iwr_value')) if st.session_state.get('iwr_value') is not None else None,
+        'initial_spending': float(current_initial_spending) if current_initial_spending is not None else None,
         'cashflows': _cashflows_to_tuple(cashflows),
     }
 
@@ -399,8 +401,13 @@ try:
         if gr_params['iwr'] is None:
             raise ValueError("Initial withdrawal rate unavailable for guardrail label calculation.")
 
-        # Initial withdrawal rate and first-period spending (already computed above for target label)
-        first_month_spending = gr_params['initial_value'] * gr_params['iwr'] / 12.0
+        # Determine the first-period spending based on the configured initial amount (if provided)
+        if gr_params['initial_spending'] is not None:
+            first_month_spending = float(gr_params['initial_spending'])
+        elif gr_params['iwr'] is not None:
+            first_month_spending = gr_params['initial_value'] * gr_params['iwr'] / 12.0
+        else:
+            raise ValueError("Initial spending unavailable for guardrail label calculation.")
 
         # Compute WRs at start of retirement using retirement start date as analysis end date
         upper_res = utils.get_wr_for_fixed_success_rate(
