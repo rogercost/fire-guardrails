@@ -334,6 +334,19 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
         'iterations': iteration + 1
     }
 
+def is_adjustment_month(ts: pd.Timestamp, adjustment_frequency: str) -> bool:
+    month = int(ts.month)
+    if adjustment_frequency == "Monthly":
+        return True
+    if adjustment_frequency == "Quarterly":
+        return ((month - 1) % 3) == 0
+    if adjustment_frequency == "Biannually":
+        return month in (1, 7)
+    if adjustment_frequency == "Annually":
+        return month == 1
+    # Fallback to monthly behaviour for unexpected values
+    return True
+
 
 def get_guardrail_withdrawals(df, start_date, end_date,
                               analysis_start_date='1871-01-01',
@@ -409,23 +422,10 @@ def get_guardrail_withdrawals(df, start_date, end_date,
     guardrail_depleted = False
     fixed_depleted = False
 
-    def _is_adjustment_month(ts: pd.Timestamp) -> bool:
-        month = int(ts.month)
-        if adjustment_frequency == "Monthly":
-            return True
-        if adjustment_frequency == "Quarterly":
-            return ((month - 1) % 3) == 0
-        if adjustment_frequency == "Biannually":
-            return month in (1, 7)
-        if adjustment_frequency == "Annually":
-            return month == 1
-        # Fallback to monthly behaviour for unexpected values
-        return True
-
     for i, row in subset.iterrows():
         current_date = row['Date']
         months_remaining = len(subset) - i
-        adjustment_allowed = _is_adjustment_month(current_date)
+        adjustment_allowed = is_adjustment_month(current_date, adjustment_frequency)
 
         status_line = f"Processing {current_date.strftime('%Y-%m')}, portfolio=${current_portfolio_value:,.0f}, months_remaining={months_remaining}"
         if on_status is not None:
@@ -445,9 +445,6 @@ def get_guardrail_withdrawals(df, start_date, end_date,
                 analysis_end_date=current_date,
                 initial_value=current_portfolio_value,
                 stock_pct=stock_pct,
-                tolerance=0.001,
-                max_iterations=50,
-                verbose=False,
                 cashflows=cashflows,
                 cashflow_schedule=schedule_slice,
             )['withdrawal_rate']
@@ -476,25 +473,18 @@ def get_guardrail_withdrawals(df, start_date, end_date,
 
                 # Step 4: Calculate proposed spending adjustment
                 if hit_upper:
-                    if len(results) == 0:
-                        print("Hit upper")
                     desired_success_rate = upper_guardrail_success + upper_adjustment_fraction * (target_success_rate - upper_guardrail_success)
                     new_wr = get_withdrawal_rate(success_rate=desired_success_rate)
                     new_proposed_spending = current_portfolio_value * new_wr / 12
                     guardrail_hit = "UPPER"
 
                 elif hit_lower:
-                    if len(results) == 0:
-                        print("Hit lower")
                     desired_success_rate = lower_guardrail_success + lower_adjustment_fraction * (target_success_rate - lower_guardrail_success)
                     new_wr = get_withdrawal_rate(success_rate=desired_success_rate)
                     new_proposed_spending = current_portfolio_value * new_wr / 12
                     guardrail_hit = "LOWER"
 
                 else:
-
-                    if len(results) == 0:
-                        print(f"Hit no guardrail, setting new_proposed_spending to {previous_total_spending}")
                     new_proposed_spending = previous_total_spending
                     guardrail_hit = "NONE"
 
@@ -524,7 +514,6 @@ def get_guardrail_withdrawals(df, start_date, end_date,
             else:
                 guardrail_hit = "SKIPPED"
                 percent_change = 0.0
-                new_proposed_spending = previous_total_spending
                 spending_target = previous_total_spending
                 adjustment_made = False
         else:
@@ -536,9 +525,6 @@ def get_guardrail_withdrawals(df, start_date, end_date,
             percent_change = 0.0
             adjustment_allowed = False
 
-        if len(results) == 0:
-            print(f"First spending target amount: {spending_target}, prev total spending is now {previous_total_spending}")
-
         withdrawal_amount = spending_target - current_cashflow
         if withdrawal_amount < 0.0:
             withdrawal_amount = 0.0
@@ -547,9 +533,6 @@ def get_guardrail_withdrawals(df, start_date, end_date,
         # Fixed path withdrawal for this month
         fixed_actual_withdrawal = 0.0 if fixed_depleted else max(fixed_total_spending - current_cashflow, 0.0)
         fixed_total_income = fixed_actual_withdrawal + current_cashflow
-
-        if len(results) == 0:
-            print(f"First total income amount: {total_income}")
 
         # Store results
         results.append({
@@ -609,11 +592,7 @@ def compute_guardrail_guidance_snapshot(
     lower_guardrail_success=0.75,
     upper_adjustment_fraction=1.0,
     lower_adjustment_fraction=0.1,
-    adjustment_frequency="Monthly",
-    spending_cap=None,
-    spending_floor=None,
-    cashflows=None,
-    verbose=False,
+    cashflows=None
 ):
     """
     Compute a single-point guidance snapshot (no historical loop), suitable for client/adviser use.
@@ -625,55 +604,10 @@ def compute_guardrail_guidance_snapshot(
       - Hypothetical adjustments on guardrail hit are computed by moving partway back toward the target
         using the upper/lower adjustment fractions. Threshold gating is intentionally ignored.
 
-    Returns a dict with:
-      - implied_withdrawal_rate               (float | None)
-      - target_withdrawal_rate               (float | None)
-      - target_monthly_spending              (float | None)
-      - upper_guardrail_value                (float | inf)
-      - lower_guardrail_value                (float | inf)
-      - upper_adjusted_monthly               (float | None)
-      - upper_adjustment_pct                 (float | None; relative to current_monthly_spending)
-      - lower_adjusted_monthly               (float | None)
-      - lower_adjustment_pct                 (float | None; relative to current_monthly_spending)
-      - months_remaining                     (int)
-      - asof_date                            (pd.Timestamp)
+    We do not take into account adjustment frequency, adjustment threshold, or spending bounds: this is "raw"
+    guidance upon which the adviser or client may impose their own custom gating thresholds.
     """
     asof = pd.to_datetime(asof_date)
-
-    def _allowed_months():
-        if adjustment_frequency == "Monthly":
-            return list(range(1, 13))
-        if adjustment_frequency == "Quarterly":
-            return [1, 4, 7, 10]
-        if adjustment_frequency == "Biannually":
-            return [1, 7]
-        if adjustment_frequency == "Annually":
-            return [1]
-        return list(range(1, 13))
-
-    allowed_months = _allowed_months()
-    adjustments_allowed = int(asof.month) in allowed_months
-
-    def _next_adjustment_month(ts: pd.Timestamp) -> pd.Timestamp:
-        if adjustment_frequency == "Monthly":
-            return ts.to_period("M").to_timestamp()
-
-        current_year = int(ts.year)
-        current_month = int(ts.month)
-        sorted_months = sorted(allowed_months)
-
-        for m in sorted_months:
-            if m >= current_month:
-                if m == current_month and adjustments_allowed:
-                    return pd.Timestamp(year=current_year, month=m, day=1)
-                if m > current_month:
-                    return pd.Timestamp(year=current_year, month=m, day=1)
-
-        # Wrap to next year if no remaining months in the current year
-        next_year = current_year + 1
-        return pd.Timestamp(year=next_year, month=sorted_months[0], day=1)
-
-    next_adjustment_date = _next_adjustment_month(asof)
 
     # Determine months remaining directly from configured duration
     num_months = int(duration_months)
@@ -694,9 +628,6 @@ def compute_guardrail_guidance_snapshot(
             analysis_end_date=asof,
             initial_value=float(current_portfolio_value),
             stock_pct=float(stock_pct),
-            tolerance=0.001,
-            max_iterations=50,
-            verbose=False,
             cashflows=cashflows,
             cashflow_schedule=monthly_cashflows,
         )
@@ -705,19 +636,6 @@ def compute_guardrail_guidance_snapshot(
     target_wr = _wr(target_success_rate)
     upper_wr = _wr(upper_guardrail_success)
     lower_wr = _wr(lower_guardrail_success)
-
-    # Base first-month spending using the target WR (matches label logic)
-    base_monthly_spending = (float(current_portfolio_value) * target_wr / 12.0) if target_wr is not None else None
-    cap_amount = (
-        float(base_monthly_spending) * float(spending_cap)
-        if base_monthly_spending is not None and spending_cap is not None
-        else None
-    )
-    floor_amount = (
-        float(base_monthly_spending) * float(spending_floor)
-        if base_monthly_spending is not None and spending_floor is not None
-        else None
-    )
 
     # Guardrail PVs where CURRENT spending equals the WR for upper/lower SRs (matches simulation logic)
     use_spending = float(initial_monthly_spending) if initial_monthly_spending is not None else None
@@ -753,25 +671,6 @@ def compute_guardrail_guidance_snapshot(
         else None
     )
 
-    def _apply_bounds(value):
-        if value is None:
-            return None
-        bounded = float(value)
-        if cap_amount is not None:
-            bounded = min(bounded, cap_amount)
-        if floor_amount is not None:
-            bounded = max(bounded, floor_amount)
-        return bounded
-
-    adj_upper_monthly = _apply_bounds(adj_upper_monthly)
-    adj_lower_monthly = _apply_bounds(adj_lower_monthly)
-
-    if not adjustments_allowed:
-        adj_upper_monthly = None
-        adj_lower_monthly = None
-        adj_upper_wr = None
-        adj_lower_wr = None
-
     # Percent change relative to CURRENT spending
     def _pct_change(new_amt):
         if new_amt is None or float(initial_monthly_spending) == 0.0:
@@ -797,7 +696,5 @@ def compute_guardrail_guidance_snapshot(
         "upper_adjustment_pct": _pct_change(adj_upper_monthly),
         "lower_adjusted_monthly": adj_lower_monthly,
         "lower_adjustment_pct": _pct_change(adj_lower_monthly),
-        "adjustments_allowed": adjustments_allowed,
-        "next_adjustment_date": next_adjustment_date,
         "current_cashflow": current_cashflow_amount,
     }

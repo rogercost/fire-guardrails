@@ -108,6 +108,7 @@ start_date = st.sidebar.date_input(
          "In Guidance Mode, this defaults to today. Even if retirement is already underway, the guidance is forward looking from today.",
     disabled=is_guidance  # In Guidance Mode, this is fixed to today
 )
+
 retirement_duration_months = st.sidebar.number_input(
     "Retirement Duration (months)",
     value=360,
@@ -116,6 +117,7 @@ retirement_duration_months = st.sidebar.number_input(
     step=12,
     help="Length of retirement in months.\n\nIn Guidance Mode, this should be the remaining number of months, if retirement is already underway."
 )
+
 analysis_start_date = st.sidebar.date_input(
     "Historical Analysis Start Date",
     value=datetime.date(1871, 1, 1),
@@ -233,6 +235,7 @@ iwr_params = {
     'cashflows': _cashflows_to_tuple(cashflows),
 }
 iwr_label_suffix = ""
+
 try:
     if 'iwr_params' not in st.session_state or st.session_state['iwr_params'] != iwr_params:
         # Ensure Shiller data is loaded or cached in session_state
@@ -278,12 +281,19 @@ try:
     else:
         iwr_label_suffix = " (Initial WR: N/A)"
         auto_current_spending = None
-except Exception:
+
+except Exception as e:
+    print(e)
     iwr_label_suffix = " (Initial WR: N/A)"
     auto_current_spending = None
+
 target_success_label = f"Target Success Rate{iwr_label_suffix}"
 target_success_rate = st.sidebar.slider(
-    target_success_label, value=st.session_state.get("target_success_rate", 0.90), min_value=0.0, max_value=1.0, step=0.01,
+    target_success_label,
+    value=st.session_state.get("target_success_rate", 0.90),
+    min_value=0.0,
+    max_value=1.0,
+    step=0.01,
     help="Desired probability of success that will be used to select an initial withdrawal rate.\n\nThe initial "
          "withdrawal rate will be the rate at which fixed withdrawals over all periods of time with length = the "
          "configured retirement period length, between the Historical Analysis Start Date and the Retirement Start "
@@ -293,7 +303,7 @@ target_success_rate = st.sidebar.slider(
     key="target_success_rate"
 )
 
-# Current spending input is primarily used in Guidance Mode but remains visible in Simulation Mode
+# Current spending input is also an output when Target Success Rate moves, until it is manually overridden
 if auto_current_spending is not None:
     st.session_state["_current_spending_auto_value"] = auto_current_spending
     current_value = st.session_state.get("initial_monthly_spending")
@@ -320,6 +330,7 @@ initial_monthly_spending = st.sidebar.number_input(
     key="initial_monthly_spending",
     on_change=_mark_current_spending_overridden,
 )
+
 # Compute dynamic labels for Guardrail Success Rates showing initial (first period) PVs
 upper_label_suffix = ""
 lower_label_suffix = ""
@@ -402,7 +413,9 @@ try:
 
     upper_label_suffix = st.session_state.get('upper_label_suffix', " (Initial PV: N/A)")
     lower_label_suffix = st.session_state.get('lower_label_suffix', " (Initial PV: N/A)")
-except Exception:
+
+except Exception as e:
+    print(e)
     upper_label_suffix = " (Initial PV: N/A)"
     lower_label_suffix = " (Initial PV: N/A)"
 
@@ -410,7 +423,11 @@ upper_guardrail_label = f"Upper Guardrail Success Rate{upper_label_suffix}"
 lower_guardrail_label = f"Lower Guardrail Success Rate{lower_label_suffix}"
 
 upper_guardrail_success = st.sidebar.slider(
-    upper_guardrail_label, value=st.session_state.get("upper_guardrail_success", 1.00), min_value=0.0, max_value=1.0, step=0.01,
+    upper_guardrail_label,
+    value=st.session_state.get("upper_guardrail_success", 1.00),
+    min_value=0.0,
+    max_value=1.0,
+    step=0.01,
     help="The withdrawal rate used to calculate the upper guardrail portfolio value.\n\nThis is the value where the "
          "current withdrawal amount, if held constant, will succeed this frequently or more, for all periods with "
          "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
@@ -418,8 +435,13 @@ upper_guardrail_success = st.sidebar.slider(
          "your spending when markets are up.",
     key="upper_guardrail_success"
 )
+
 lower_guardrail_success = st.sidebar.slider(
-    lower_guardrail_label, value=st.session_state.get("lower_guardrail_success", 0.75), min_value=0.0, max_value=1.0, step=0.01,
+    lower_guardrail_label,
+    value=st.session_state.get("lower_guardrail_success", 0.75),
+    min_value=0.0,
+    max_value=1.0,
+    step=0.01,
     help="The withdrawal rate used to calculate the lower guardrail portfolio value.\n\nThis is the value where the "
          "current withdrawal amount, if held constant, will succeed this frequently or less, for all periods with "
          "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
@@ -427,8 +449,13 @@ lower_guardrail_success = st.sidebar.slider(
          "sooner when markets are down.",
     key="lower_guardrail_success"
 )
+
 upper_adjustment_fraction = st.sidebar.slider(
-    "Upper Adjustment Fraction", value=1.0, min_value=0.0, max_value=1.0, step=0.05,
+    "Upper Adjustment Fraction",
+    value=1.0,
+    min_value=0.0,
+    max_value=1.0,
+    step=0.05,
     help="How much to increase spending when we hit the upper guardrail.\n\nExpressed as a % of the distance between "
          "the Upper Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the upper guardrail "
          "represents 100% success and the target is 90%, setting this value to 50% means we go half the distance back "
@@ -436,7 +463,11 @@ upper_adjustment_fraction = st.sidebar.slider(
          "is more aggressive, and will cause you to make larger spending increases when you hit the upper guardrail."
 )
 lower_adjustment_fraction = st.sidebar.slider(
-    "Lower Adjustment Fraction", value=0.1, min_value=0.0, max_value=1.0, step=0.05,
+    "Lower Adjustment Fraction",
+    value=0.1,
+    min_value=0.0,
+    max_value=1.0,
+    step=0.05,
     help="How much to decrease spending when we hit the lower guardrail.\n\nExpressed as a % of the distance between "
          "the Lower Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the lower guardrail "
          "represents 70% success and the target is 90%, setting this value to 50% means we go half the distance back "
@@ -447,7 +478,9 @@ lower_adjustment_fraction = st.sidebar.slider(
 adjustment_threshold = st.sidebar.slider(
     "Adjustment Threshold (e.g., 0.05 for 5%)",
     value=0.0 if is_guidance else 0.05,
-    min_value=0.0, max_value=0.2, step=0.01,
+    min_value=0.0,
+    max_value=0.2,
+    step=0.01,
     help="The minimum percent difference between our new spending and our prior spending, before we make a change.\n\n"
          "Even if we hit a guardrail, we may elect to set this to 5% to avoid making lots of small adjustments. Set it "
          "to 0% to disable it and allow all guardrail hits to trigger spending adjustments.\n\nSetting this higher is "
@@ -462,7 +495,8 @@ adjustment_frequency = st.sidebar.selectbox(
     options=["Monthly", "Quarterly", "Biannually", "Annually"],
     index=0,
     help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
-         "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January)."
+         "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January).",
+    disabled=is_guidance  # In Guidance Mode, no decision gating, it's up to the adviser and client
 )
 
 def _relative_option_to_multiplier(option: str):
@@ -472,7 +506,6 @@ def _relative_option_to_multiplier(option: str):
         return float(option.strip("%")) / 100.0
     except (TypeError, ValueError):
         return None
-
 
 spending_cap_multiplier = _relative_option_to_multiplier(st.session_state.get("spending_cap_option"))
 spending_floor_multiplier = _relative_option_to_multiplier(st.session_state.get("spending_floor_option"))
@@ -517,7 +550,6 @@ def render_dirty_banner():
         """,
         unsafe_allow_html=True
     )
-
 
 def render_simulation_results(results_df: pd.DataFrame) -> None:
     """Render charts and summaries for simulation results."""
@@ -820,12 +852,14 @@ with st.sidebar.expander("Advanced Controls"):
         options=cap_options,
         key="spending_cap_option",
         help="Maximum spending level as a percent of the initial monthly spending.",
+        disabled=is_guidance  # In Guidance Mode, no decision gating, it's up to the adviser and client
     )
     st.selectbox(
         "Spending Floor",
         options=floor_options,
         key="spending_floor_option",
         help="Minimum spending level as a percent of the initial monthly spending.",
+        disabled = is_guidance  # In Guidance Mode, no decision gating, it's up to the adviser and client
     )
 
     if st.button("Add Recurring Cashflow", key="add_cashflow_btn"):
@@ -905,7 +939,6 @@ if is_guidance:
     latest_shiller_date = pd.to_datetime(shiller_df["Date"].max()).date()
     asof_date = latest_shiller_date if latest_shiller_date <= today else today
 
-
     try:
         snap = utils.compute_guardrail_guidance_snapshot(
             df=shiller_df,
@@ -920,11 +953,7 @@ if is_guidance:
             lower_guardrail_success=lower_guardrail_success,
             upper_adjustment_fraction=upper_adjustment_fraction,
             lower_adjustment_fraction=lower_adjustment_fraction,
-            adjustment_frequency=adjustment_frequency,
-            spending_cap=spending_cap_multiplier,
-            spending_floor=spending_floor_multiplier,
-            cashflows=cashflows,
-            verbose=False
+            cashflows=cashflows
         )
 
         def fmt_money(x):
@@ -950,8 +979,6 @@ if is_guidance:
         low_adj_month = snap.get("lower_adjusted_monthly")
         low_adj_year = (low_adj_month * 12.0) if low_adj_month is not None else None
 
-        adjustments_allowed = snap.get("adjustments_allowed", True)
-        next_adjustment_date = snap.get("next_adjustment_date")
         cashflow_month0 = snap.get("current_cashflow")
 
         def fmt_month(ts):
@@ -964,12 +991,6 @@ if is_guidance:
         st.markdown("Use this mode to generate forward-looking guidance for a client who is retired today and in drawdown.\n\n"
                     "For more information, see the [official documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
 
-        if not adjustments_allowed:
-            st.info(
-                "Adjustments are restricted to the selected cadence. "
-                f"The next eligible adjustment month is {fmt_month(next_adjustment_date)}."
-            )
-
         if start_wr is not None:
             st.markdown(
                 f"* **Target Withdrawal Rate:** {start_wr*100:.2f}% "
@@ -980,22 +1001,15 @@ if is_guidance:
             st.markdown("**Starting Withdrawal Rate:** N/A")
 
         st.markdown(f"* **Month 1 Cashflows:** {fmt_money(cashflow_month0)}/month")
-        if adjustments_allowed:
-            st.markdown(
-                f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Current Monthly Spending\n  * If client's portfolio value exceeds this, adjust "
-                f"spending by {fmt_pct(up_adj_pct)} to {fmt_money(up_adj_month)}/month or {fmt_money(up_adj_year)}/year"
-            )
-            st.markdown(
-                f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Current Monthly Spending\n  * If client's portfolio value falls below this, adjust "
-                f"spending by {fmt_pct(low_adj_pct)} to {fmt_money(low_adj_month)}/month or {fmt_money(low_adj_year)}/year"
-            )
-        else:
-            st.markdown(
-                f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Current Monthly Spending."
-            )
-            st.markdown(
-                f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Current Monthly Spending."
-            )
+
+        st.markdown(
+            f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Current Monthly Spending\n  * If client's portfolio value exceeds this, adjust "
+            f"spending by {fmt_pct(up_adj_pct)} to {fmt_money(up_adj_month)}/month or {fmt_money(up_adj_year)}/year"
+        )
+        st.markdown(
+            f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Current Monthly Spending\n  * If client's portfolio value falls below this, adjust "
+            f"spending by {fmt_pct(low_adj_pct)} to {fmt_money(low_adj_month)}/month or {fmt_money(low_adj_year)}/year"
+        )
 
     except Exception as e:
         st.error(f"Unable to compute guidance snapshot: {e}")
@@ -1004,7 +1018,6 @@ elif st.sidebar.button(
     "Run Simulation",
     help="Fetch data and run the guardrail withdrawal simulation with the selected parameters."
 ):
-
     status_ph = st.empty()
     status_ph.text("Loading Shiller data...")
     shiller_df = st.session_state.get('shiller_df')
@@ -1076,5 +1089,5 @@ elif not is_guidance:
     else:
         st.subheader("Simulation Mode")
         st.markdown("Use this mode to simulate running a guardrail-based retirement withdrawal strategy during a historical period.\n\n"
-                    "For more information, see the [official documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
+                    "For more information, see the [documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
         st.info("Adjust parameters in the sidebar and click 'Run Simulation' to start.")
