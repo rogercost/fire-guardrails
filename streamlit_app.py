@@ -274,10 +274,7 @@ try:
     iwr = st.session_state.get('iwr_value')
     if iwr is not None:
         iwr_label_suffix = f" (Initial WR: {iwr*100:.2f}%)"
-        if is_guidance:
-            auto_current_spending = round(float(initial_value) * float(iwr) / 12.0)
-        else:
-            auto_current_spending = None
+        auto_current_spending = round(float(initial_value) * float(iwr) / 12.0)
     else:
         iwr_label_suffix = " (Initial WR: N/A)"
         auto_current_spending = None
