@@ -453,13 +453,10 @@ def get_guardrail_withdrawals(df, start_date, end_date,
             )['withdrawal_rate']
 
         if not guardrail_depleted:
-            # Calculate 3 withdrawal rates: the target, and the upper and lower guardrail, based on the current portfolio
-            # value and months remaining
+
+            # Calculate the upper and lower guardrail withdrawal rates, based on the current spending and months remaining
             #
-            target_wr = get_withdrawal_rate(success_rate=target_success_rate)
-
             upper_wr = get_withdrawal_rate(success_rate=upper_guardrail_success)
-
             lower_wr = get_withdrawal_rate(success_rate=lower_guardrail_success)
 
             # The guardrail portfolio values are the values that would result in the current withdrawal amount
@@ -531,7 +528,6 @@ def get_guardrail_withdrawals(df, start_date, end_date,
                 spending_target = previous_total_spending
                 adjustment_made = False
         else:
-            target_wr = np.nan
             upper_guardrail_value = 0.0
             lower_guardrail_value = 0.0
             spending_target = 0.0
@@ -566,7 +562,6 @@ def get_guardrail_withdrawals(df, start_date, end_date,
             'Fixed_WR_Value': fixed_portfolio_value,
             'Fixed_WR_Withdrawal': fixed_actual_withdrawal,
             'Fixed_WR_Total_Income': fixed_total_income,
-            'Target_WR': target_wr,
             'Upper_Guardrail': upper_guardrail_value,
             'Lower_Guardrail': lower_guardrail_value,
             'Guardrail_Hit': guardrail_hit,
