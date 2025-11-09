@@ -87,7 +87,11 @@ def _sidebar_month_year_selector(
     if disabled:
         previous_year = st.session_state.get(year_key)
         previous_month = st.session_state.get(month_key)
-        if previous_year is not None and previous_month is not None:
+        if (
+            previous_year is not None
+            and previous_month is not None
+            and saved_key not in st.session_state
+        ):
             st.session_state[saved_key] = (previous_year, previous_month)
         st.session_state.pop(year_key, None)
         st.session_state.pop(month_key, None)
@@ -102,8 +106,7 @@ def _sidebar_month_year_selector(
     year_options = list(range(min_date.year, max_date.year + 1))
     default_year = default_date.year
 
-    container = st.sidebar.container()
-    year_column, month_column = container.columns(2, gap="small")
+    year_column, month_column = st.sidebar.columns(2, gap="small")
 
     desired_year = default_year if disabled else st.session_state.get(year_key)
     if desired_year is None and restored_selection is not None:
@@ -117,7 +120,7 @@ def _sidebar_month_year_selector(
         st.session_state[year_key] = desired_year
 
     with year_column:
-        selected_year = year_column.selectbox(
+        selected_year = st.selectbox(
             label,
             year_options,
             index=year_options.index(desired_year),
@@ -147,7 +150,7 @@ def _sidebar_month_year_selector(
         st.session_state[month_key] = desired_month
 
     with month_column:
-        selected_month = month_column.selectbox(
+        selected_month = st.selectbox(
             "Month",
             month_options,
             index=month_options.index(desired_month),
