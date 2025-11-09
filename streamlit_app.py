@@ -55,6 +55,8 @@ def _render_sidebar_label(
         " display: flex;"
         " align-items: center;"
         " gap: 0.25rem;"
+        " justify-content: space-between;"
+        " width: 100%;"
     )
     if color:
         style += f" color: {color};"
@@ -63,7 +65,7 @@ def _render_sidebar_label(
         tooltip = html.escape(help_text).replace("\n", "&#10;")
         help_html = (
             "<span style=\"font-size: 0.75rem; color: var(--secondary-text-color, #6c757d);"
-            " cursor: help;\" title=\"{tooltip}\">&#9432;</span>"
+            " cursor: help; margin-left: auto;\" title=\"{tooltip}\">(?)</span>"
         )
     target = container if container is not None else st.sidebar
     target.markdown(
@@ -109,15 +111,15 @@ def _sidebar_month_year_selector(
 
     with year_column:
         _render_sidebar_label("Year", container=year_column)
-        if disabled:
-            st.session_state[f"{key_prefix}_year"] = default_year
+        year_key = f"{key_prefix}_year"
+        if disabled or st.session_state.get(year_key) not in year_options:
+            st.session_state.pop(year_key, None)
         selected_year = year_column.selectbox(
             "",
             year_options,
-            index=year_options.index(default_year),
-            key=f"{key_prefix}_year",
+            index=year_options.index(st.session_state.get(year_key, default_year)),
+            key=year_key,
             disabled=disabled,
-            help=help_text,
             on_change=_unmark_initial_spending_overridden,
             label_visibility="collapsed",
         )
@@ -131,16 +133,15 @@ def _sidebar_month_year_selector(
     if default_month not in month_options:
         default_month = month_options[0]
 
-    if disabled:
-        st.session_state[month_key] = default_month
+    if disabled or st.session_state.get(month_key) not in month_options:
+        st.session_state.pop(month_key, None)
 
     stored_month = st.session_state.get(month_key, default_month)
     if stored_month not in month_options:
-        if isinstance(stored_month, int):
-            stored_month = min(max(stored_month, month_options[0]), month_options[-1])
+        if default_month in month_options:
+            stored_month = default_month
         else:
-            stored_month = month_options[0]
-        st.session_state[month_key] = stored_month
+            stored_month = min(max(default_month, month_options[0]), month_options[-1])
 
     with month_column:
         _render_sidebar_label("Month", container=month_column)
