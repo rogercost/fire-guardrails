@@ -33,6 +33,10 @@ if "spending_floor_option" not in st.session_state:
     st.session_state["spending_floor_option"] = "Unlimited"
 if "cashflows" not in st.session_state:
     st.session_state["cashflows"] = []
+if "_current_spending_overridden" not in st.session_state:
+    st.session_state["_current_spending_overridden"] = False
+if "_current_spending_auto_value" not in st.session_state:
+    st.session_state["_current_spending_auto_value"] = None
 
 
 # Helpers for cashflow management
@@ -84,6 +88,12 @@ def _clear_cashflow_widget_state(start_idx: int = 0) -> None:
         del st.session_state[key]
 
 
+def _mark_current_spending_overridden() -> None:
+    """Flag that the current spending widget has been manually overridden."""
+
+    st.session_state["_current_spending_overridden"] = True
+
+
 # Sidebar for inputs
 st.sidebar.header("Simulation Parameters")
 
@@ -121,17 +131,6 @@ initial_value = st.sidebar.number_input(
     "Initial Portfolio Value",
     value=1_000_000, min_value=100_000, step=100_000,
     help="Starting portfolio balance in dollars at retirement."
-)
-
-# New input used by Guidance Mode (hidden/disabled in Simulation Mode)
-current_monthly_spending = st.sidebar.number_input(
-    "Current Monthly Spending",
-    value=3300,
-    min_value=0,
-    step=10,
-    help="Your current monthly spending level. Used only in Guidance Mode to compute guardrail values and hypothetical adjustments.",
-    disabled=not is_guidance,
-    key="current_monthly_spending"
 )
 
 stock_pct = st.sidebar.slider(
@@ -275,10 +274,16 @@ try:
     iwr = st.session_state.get('iwr_value')
     if iwr is not None:
         iwr_label_suffix = f" (Initial WR: {iwr*100:.2f}%)"
+        if is_guidance:
+            auto_current_spending = float(initial_value) * float(iwr) / 12.0
+        else:
+            auto_current_spending = None
     else:
         iwr_label_suffix = " (Initial WR: N/A)"
+        auto_current_spending = None
 except Exception:
     iwr_label_suffix = " (Initial WR: N/A)"
+    auto_current_spending = None
 target_success_label = f"Target Success Rate{iwr_label_suffix}"
 target_success_rate = st.sidebar.slider(
     target_success_label, value=st.session_state.get("target_success_rate", 0.90), min_value=0.0, max_value=1.0, step=0.01,
@@ -289,6 +294,36 @@ target_success_rate = st.sidebar.slider(
          "lower initial spending, lower chance of adjustment; setting this lower is more aggressive, 0.75-0.60 provides higher "
          "initial spending, higher chance of adjustment.",
     key="target_success_rate"
+)
+
+# New input used by Guidance Mode (hidden/disabled in Simulation Mode)
+if auto_current_spending is not None:
+    st.session_state["_current_spending_auto_value"] = auto_current_spending
+    current_value = st.session_state.get("current_monthly_spending")
+    if st.session_state.get("_current_spending_overridden") and current_value is not None and np.isclose(
+        float(current_value), float(auto_current_spending), rtol=0.0, atol=0.005
+    ):
+        st.session_state["_current_spending_overridden"] = False
+    if not st.session_state.get("_current_spending_overridden"):
+        if current_value is None or not np.isclose(float(current_value), float(auto_current_spending), rtol=0.0, atol=0.005):
+            st.session_state["current_monthly_spending"] = float(auto_current_spending)
+else:
+    st.session_state["_current_spending_auto_value"] = None
+    if not is_guidance:
+        st.session_state["_current_spending_overridden"] = False
+
+if "current_monthly_spending" not in st.session_state or st.session_state["current_monthly_spending"] is None:
+    st.session_state["current_monthly_spending"] = 0.0
+
+current_monthly_spending = st.sidebar.number_input(
+    "Current Monthly Spending",
+    min_value=0.0,
+    step=10.0,
+    format="%.2f",
+    help="Your current monthly spending level. Used only in Guidance Mode to compute guardrail values and hypothetical adjustments.",
+    disabled=not is_guidance,
+    key="current_monthly_spending",
+    on_change=_mark_current_spending_overridden,
 )
 # Compute dynamic labels for Guardrail Success Rates showing initial (first period) PVs
 upper_label_suffix = ""
