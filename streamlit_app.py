@@ -32,17 +32,18 @@ if "spending_floor_option" not in st.session_state:
     st.session_state["spending_floor_option"] = "Unlimited"
 if "cashflows" not in st.session_state:
     st.session_state["cashflows"] = []
-if "_current_spending_overridden" not in st.session_state:
-    st.session_state["_current_spending_overridden"] = False
-if "_current_spending_auto_value" not in st.session_state:
-    st.session_state["_current_spending_auto_value"] = None
+if "_initial_spending_overridden" not in st.session_state:
+    st.session_state["_initial_spending_overridden"] = False
+if "_initial_spending_auto_value" not in st.session_state:
+    st.session_state["_initial_spending_auto_value"] = None
 
-
-def _mark_current_spending_overridden() -> None:
+def _mark_initial_spending_overridden() -> None:
     """Flag that the current spending widget has been manually overridden."""
+    st.session_state["_initial_spending_overridden"] = True
 
-    st.session_state["_current_spending_overridden"] = True
-
+def _unmark_initial_spending_overridden() -> None:
+    """Flag that the current spending widget is no longer being manually overridden."""
+    st.session_state["_initial_spending_overridden"] = False
 
 # Sidebar for inputs
 st.sidebar.header("Simulation Parameters")
@@ -56,7 +57,8 @@ start_date = st.sidebar.date_input(
     max_value=today_date,
     help="First retirement month used for withdrawals.\n\nIn Simulation Mode, the historical simulations begin from this date.\n\n"
          "In Guidance Mode, this defaults to today. Even if retirement is already underway, the guidance is forward looking from today.",
-    disabled=is_guidance  # In Guidance Mode, this is fixed to today
+    disabled=is_guidance,  # In Guidance Mode, this is fixed to today
+    on_change=_unmark_initial_spending_overridden,
 )
 
 retirement_duration_months = st.sidebar.number_input(
@@ -65,6 +67,7 @@ retirement_duration_months = st.sidebar.number_input(
     min_value=1,
     max_value=1200,
     step=12,
+    on_change=_unmark_initial_spending_overridden,
     help="Length of retirement in months.\n\nIn Guidance Mode, this should be the remaining number of months, if retirement is already underway."
 )
 
@@ -73,6 +76,7 @@ analysis_start_date = st.sidebar.date_input(
     value=datetime.date(1871, 1, 1),
     min_value=datetime.date(1871, 1, 1),
     max_value=datetime.date.today(),
+    on_change=_unmark_initial_spending_overridden,
     help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nNote that when running historical "
          "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
          "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!"
@@ -81,12 +85,20 @@ analysis_start_date = st.sidebar.date_input(
 # Numeric Inputs
 initial_value = st.sidebar.number_input(
     "Initial Portfolio Value",
-    value=1_000_000, min_value=100_000, step=100_000,
+    value=1_000_000,
+    min_value=100_000,
+    step=100_000,
+    on_change=_unmark_initial_spending_overridden,
     help="Starting portfolio balance in dollars at retirement."
 )
 
 stock_pct = st.sidebar.slider(
-    "Stock Percentage", value=0.75, min_value=0.0, max_value=1.0, step=0.05,
+    "Stock Percentage",
+    value=0.75,
+    min_value=0.0,
+    max_value=1.0,
+    step=0.01,
+    on_change=_unmark_initial_spending_overridden,
     help="Fraction of the portfolio allocated to US stocks; remainder to 10Y treasuries."
 )
 
@@ -120,15 +132,15 @@ try:
     iwr = st.session_state.get('iwr_value')
     if iwr is not None:
         iwr_label_suffix = f" (Initial WR: {iwr*100:.2f}%)"
-        auto_current_spending = round(float(initial_value) * float(iwr) / 12.0)
+        auto_initial_spending = round(float(initial_value) * float(iwr) / 12.0)
     else:
         iwr_label_suffix = " (Initial WR: N/A)"
-        auto_current_spending = None
+        auto_initial_spending = None
 
 except Exception as e:
     print(e)
     iwr_label_suffix = " (Initial WR: N/A)"
-    auto_current_spending = None
+    auto_initial_spending = None
 
 target_success_label = f"Target Success Rate{iwr_label_suffix}"
 target_success_rate = st.sidebar.slider(
@@ -143,22 +155,23 @@ target_success_rate = st.sidebar.slider(
          "Date, end with >0 values this percent of the time.\n\nSetting this higher, e.g. 0.80-0.99, is more conservative: "
          "lower initial spending, lower chance of adjustment; setting this lower is more aggressive, 0.75-0.60 provides higher "
          "initial spending, higher chance of adjustment.",
-    key="target_success_rate"
+    key="target_success_rate",
+    on_change=_unmark_initial_spending_overridden,
 )
 
 # Current spending input is also an output when Target Success Rate moves, until it is manually overridden
-if auto_current_spending is not None:
-    st.session_state["_current_spending_auto_value"] = auto_current_spending
+if auto_initial_spending is not None:
+    st.session_state["_initial_spending_auto_value"] = auto_initial_spending
     current_value = st.session_state.get("initial_monthly_spending")
-    if st.session_state.get("_current_spending_overridden") and current_value is not None and np.isclose(
-        float(current_value), float(auto_current_spending), rtol=0.0, atol=0.5
+    if st.session_state.get("_initial_spending_overridden") and current_value is not None and np.isclose(
+        float(current_value), float(auto_initial_spending), rtol=0.0, atol=0.5
     ):
-        st.session_state["_current_spending_overridden"] = False
-    if not st.session_state.get("_current_spending_overridden"):
-        if current_value is None or not np.isclose(float(current_value), float(auto_current_spending), rtol=0.0, atol=0.5):
-            st.session_state["initial_monthly_spending"] = float(auto_current_spending)
+        st.session_state["_initial_spending_overridden"] = False
+    if not st.session_state.get("_initial_spending_overridden"):
+        if current_value is None or not np.isclose(float(current_value), float(auto_initial_spending), rtol=0.0, atol=0.5):
+            st.session_state["initial_monthly_spending"] = float(auto_initial_spending)
 else:
-    st.session_state["_current_spending_auto_value"] = None
+    st.session_state["_initial_spending_auto_value"] = None
 
 if "initial_monthly_spending" not in st.session_state or st.session_state["initial_monthly_spending"] is None:
     st.session_state["initial_monthly_spending"] = 0.0
@@ -171,7 +184,7 @@ initial_monthly_spending = st.sidebar.number_input(
     help="The initial monthly spending level for the retirement simulation, which will be used until a guardrail is hit.\n\n"
          "Automatically updates as you change the Target Withdrawal Rate, but can be set to a custom value if desired.\n\n",
     key="initial_monthly_spending",
-    on_change=_mark_current_spending_overridden,
+    on_change=_mark_initial_spending_overridden,
 )
 
 # Compute dynamic labels for Guardrail Success Rates showing initial (first period) PVs
