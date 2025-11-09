@@ -4,6 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
+from typing import Optional
 import utils
 
 
@@ -115,7 +116,52 @@ def update_guardrail_dynamic_labels(gr_params: dict, is_guidance: bool, cashflow
         'upper_label_suffix'] = f" (Initial PV: ${upper_pv:,.0f})" if upper_pv is not None else " (Initial PV: N/A)"
     st.session_state[
         'lower_label_suffix'] = f" (Initial PV: ${lower_pv:,.0f})" if lower_pv is not None else " (Initial PV: N/A)"
+
+    upper_color = None
+    lower_color = None
+
+    try:
+        initial_value = float(gr_params['initial_value'])
+    except (KeyError, TypeError, ValueError):
+        initial_value = None
+
+    if initial_value is not None:
+        if upper_pv is not None and upper_pv < initial_value:
+            upper_color = "#d62728"
+        if lower_pv is not None and lower_pv > initial_value:
+            lower_color = "#d62728"
+
+    st.session_state['upper_label_color'] = upper_color
+    st.session_state['lower_label_color'] = lower_color
     st.session_state['guardrail_params'] = gr_params
+
+
+def update_initial_spending_label(initial_spending: float,
+                                  initial_value: float,
+                                  auto_spending: Optional[float],
+                                  overridden: bool) -> None:
+    """Compute the dynamic label text and color for the Initial Monthly Spending control."""
+
+    wr = None
+    if initial_value and initial_value > 0:
+        wr = (initial_spending * 12.0) / float(initial_value)
+
+    if wr is not None and np.isfinite(wr):
+        label_text = f"Initial Monthly Spending ({wr * 100:.2f}% WR)"
+    else:
+        label_text = "Initial Monthly Spending (WR: N/A)"
+
+    label_color = None
+    if overridden and auto_spending is not None:
+        if np.isclose(initial_spending, auto_spending, rtol=0.0, atol=0.5):
+            label_color = None
+        elif initial_spending > auto_spending:
+            label_color = "#d62728"
+        else:
+            label_color = "#2ca02c"
+
+    st.session_state['initial_spending_label_text'] = label_text
+    st.session_state['initial_spending_label_color'] = label_color
 
 
 def render_simulation_results(results_df: pd.DataFrame) -> None:
