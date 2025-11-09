@@ -1,5 +1,6 @@
-import datetime
 import calendar
+import datetime
+import html
 
 import streamlit as st
 import pandas as pd
@@ -40,18 +41,35 @@ if "_initial_spending_auto_value" not in st.session_state:
     st.session_state["_initial_spending_auto_value"] = None
 
 def _render_sidebar_label(
-    text: str, color: Optional[str] = None, *, container=None
+    text: str,
+    color: Optional[str] = None,
+    *,
+    container=None,
+    help_text: Optional[str] = None,
 ) -> None:
     style = (
         "margin: 0 0 0.25rem 0;"
         " font-size: var(--font-size-sm, 0.875rem);"
         " font-weight: var(--font-weight-normal, 400);"
         " line-height: var(--line-height-sm, 1.4);"
+        " display: flex;"
+        " align-items: center;"
+        " gap: 0.25rem;"
     )
     if color:
         style += f" color: {color};"
+    help_html = ""
+    if help_text:
+        tooltip = html.escape(help_text).replace("\n", "&#10;")
+        help_html = (
+            "<span style=\"font-size: 0.75rem; color: var(--secondary-text-color, #6c757d);"
+            " cursor: help;\" title=\"{tooltip}\">&#9432;</span>"
+        )
     target = container if container is not None else st.sidebar
-    target.markdown(f"<div style=\"{style}\">{text}</div>", unsafe_allow_html=True)
+    target.markdown(
+        f"<div style=\"{style}\">{text}{help_html}</div>",
+        unsafe_allow_html=True,
+    )
 
 def _mark_initial_spending_overridden() -> None:
     """Flag that the current spending widget has been manually overridden."""
@@ -86,11 +104,13 @@ def _sidebar_month_year_selector(
     year_options = list(range(min_date.year, max_date.year + 1))
     default_year = default_date.year
 
-    _render_sidebar_label(label)
+    _render_sidebar_label(label, help_text=help_text)
     year_column, month_column = st.sidebar.columns(2, gap="small")
 
     with year_column:
         _render_sidebar_label("Year", container=year_column)
+        if disabled:
+            st.session_state[f"{key_prefix}_year"] = default_year
         selected_year = year_column.selectbox(
             "",
             year_options,
@@ -110,6 +130,9 @@ def _sidebar_month_year_selector(
     default_month = default_date.month
     if default_month not in month_options:
         default_month = month_options[0]
+
+    if disabled:
+        st.session_state[month_key] = default_month
 
     stored_month = st.session_state.get(month_key, default_month)
     if stored_month not in month_options:
