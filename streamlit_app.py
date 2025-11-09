@@ -39,7 +39,7 @@ if "_initial_spending_auto_value" not in st.session_state:
     st.session_state["_initial_spending_auto_value"] = None
 
 def _render_sidebar_label(text: str, color: Optional[str] = None) -> None:
-    style = "font-weight: 600; margin: 0 0 0.25rem 0;"
+    style = "margin: 0 0 0.25rem 0;"
     if color:
         style += f" color: {color};"
     st.sidebar.markdown(f"<div style=\"{style}\">{text}</div>", unsafe_allow_html=True)
