@@ -3,6 +3,7 @@ import datetime
 import streamlit as st
 import pandas as pd
 import numpy as np
+from typing import Optional
 
 import utils
 import display
@@ -36,6 +37,12 @@ if "_initial_spending_overridden" not in st.session_state:
     st.session_state["_initial_spending_overridden"] = False
 if "_initial_spending_auto_value" not in st.session_state:
     st.session_state["_initial_spending_auto_value"] = None
+
+def _render_sidebar_label(text: str, color: Optional[str] = None) -> None:
+    style = "font-weight: 600; margin: 0 0 0.25rem 0;"
+    if color:
+        style += f" color: {color};"
+    st.sidebar.markdown(f"<div style=\"{style}\">{text}</div>", unsafe_allow_html=True)
 
 def _mark_initial_spending_overridden() -> None:
     """Flag that the current spending widget has been manually overridden."""
@@ -176,8 +183,25 @@ else:
 if "initial_monthly_spending" not in st.session_state or st.session_state["initial_monthly_spending"] is None:
     st.session_state["initial_monthly_spending"] = 0.0
 
+try:
+    display.update_initial_spending_label(
+        initial_spending=float(st.session_state.get("initial_monthly_spending", 0.0)),
+        initial_value=float(initial_value),
+        auto_spending=st.session_state.get("_initial_spending_auto_value"),
+        overridden=bool(st.session_state.get("_initial_spending_overridden", False)),
+    )
+except Exception as e:
+    print(e)
+    st.session_state['initial_spending_label_text'] = "Initial Monthly Spending (WR: N/A)"
+    st.session_state['initial_spending_label_color'] = None
+
+initial_spending_label = st.session_state.get('initial_spending_label_text', "Initial Monthly Spending (WR: N/A)")
+initial_spending_color = st.session_state.get('initial_spending_label_color')
+
+_render_sidebar_label(initial_spending_label, initial_spending_color)
+
 initial_monthly_spending = st.sidebar.number_input(
-    "Initial Monthly Spending",
+    initial_spending_label,
     min_value=0.0,
     step=10.0,
     format="%.0f",
@@ -185,6 +209,7 @@ initial_monthly_spending = st.sidebar.number_input(
          "Automatically updates as you change the Target Withdrawal Rate, but can be set to a custom value if desired.\n\n",
     key="initial_monthly_spending",
     on_change=_mark_initial_spending_overridden,
+    label_visibility="collapsed",
 )
 
 # Compute dynamic labels for Guardrail Success Rates showing initial (first period) PVs
@@ -214,9 +239,16 @@ except Exception as e:
     print(e)
     upper_label_suffix = " (Initial PV: N/A)"
     lower_label_suffix = " (Initial PV: N/A)"
+    st.session_state['upper_label_color'] = None
+    st.session_state['lower_label_color'] = None
 
 upper_guardrail_label = f"Upper Guardrail Success Rate{upper_label_suffix}"
 lower_guardrail_label = f"Lower Guardrail Success Rate{lower_label_suffix}"
+
+upper_label_color = st.session_state.get('upper_label_color')
+lower_label_color = st.session_state.get('lower_label_color')
+
+_render_sidebar_label(upper_guardrail_label, upper_label_color)
 
 upper_guardrail_success = st.sidebar.slider(
     upper_guardrail_label,
@@ -229,8 +261,11 @@ upper_guardrail_success = st.sidebar.slider(
          "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
          "simulation date.\n\nSetting this higher is more conservative, and will cause you to wait longer to increase "
          "your spending when markets are up.",
-    key="upper_guardrail_success"
+    key="upper_guardrail_success",
+    label_visibility="collapsed"
 )
+
+_render_sidebar_label(lower_guardrail_label, lower_label_color)
 
 lower_guardrail_success = st.sidebar.slider(
     lower_guardrail_label,
@@ -243,7 +278,8 @@ lower_guardrail_success = st.sidebar.slider(
          "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
          "simulation date.\n\nSetting this higher is more conservative, and will cause you to decrease your spending "
          "sooner when markets are down.",
-    key="lower_guardrail_success"
+    key="lower_guardrail_success",
+    label_visibility="collapsed"
 )
 
 upper_adjustment_fraction = st.sidebar.slider(
