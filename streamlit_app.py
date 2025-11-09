@@ -237,42 +237,7 @@ iwr_label_suffix = ""
 
 try:
     if 'iwr_params' not in st.session_state or st.session_state['iwr_params'] != iwr_params:
-        # Ensure Shiller data is loaded or cached in session_state
-        shiller_df = st.session_state.get('shiller_df')
-        if shiller_df is None:
-            shiller_df = utils.load_shiller_data()
-            st.session_state['shiller_df'] = shiller_df
-
-        # Determine horizon length in months based on duration input
-        if is_guidance:
-            latest_shiller_date = pd.to_datetime(shiller_df["Date"].max())
-            asof_for_iwr = latest_shiller_date if latest_shiller_date <= pd.to_datetime(datetime.date.today()) else pd.to_datetime(datetime.date.today())
-            num_months = int(retirement_duration_months)
-            if num_months <= 0:
-                num_months = 360
-            analysis_end_date_used = asof_for_iwr
-        else:
-            num_months = int(retirement_duration_months)
-            if num_months <= 0:
-                raise ValueError("Invalid retirement duration to compute initial WR.")
-            analysis_end_date_used = iwr_params['start_date']
-
-        res = utils.get_wr_for_fixed_success_rate(
-            df=shiller_df,
-            desired_success_rate=iwr_params['desired_success_rate'],
-            num_months=num_months,
-            analysis_start_date=iwr_params['analysis_start_date'],
-            analysis_end_date=analysis_end_date_used,  # Use 'today' in Guidance Mode to match label logic
-            initial_value=iwr_params['initial_value'],
-            stock_pct=iwr_params['stock_pct'],
-            tolerance=0.001,
-            max_iterations=50,
-            verbose=False,
-            cashflows=cashflows,
-        )
-        st.session_state['iwr_value'] = float(res['withdrawal_rate']) if res['withdrawal_rate'] is not None else None
-        st.session_state['iwr_params'] = iwr_params
-
+        display.update_iwr_dynamic_label(iwr_params=iwr_params, is_guidance=is_guidance, cashflows=cashflows)
     iwr = st.session_state.get('iwr_value')
     if iwr is not None:
         iwr_label_suffix = f" (Initial WR: {iwr*100:.2f}%)"
@@ -347,68 +312,7 @@ try:
     }
 
     if ('guardrail_params' not in st.session_state) or (st.session_state['guardrail_params'] != gr_params):
-        # Ensure Shiller data is available
-        shiller_df = st.session_state.get('shiller_df')
-        if shiller_df is None:
-            shiller_df = utils.load_shiller_data()
-            st.session_state['shiller_df'] = shiller_df
-
-        # Determine horizon length in months based on duration input
-        if is_guidance:
-            latest_shiller_date = pd.to_datetime(shiller_df["Date"].max())
-            asof_for_gr = latest_shiller_date if latest_shiller_date <= pd.to_datetime(datetime.date.today()) else pd.to_datetime(datetime.date.today())
-            num_months = int(retirement_duration_months)
-            if num_months <= 0:
-                num_months = 360
-            analysis_end_date_used = asof_for_gr
-        else:
-            num_months = int(retirement_duration_months)
-            if num_months <= 0:
-                raise ValueError("Invalid retirement duration to compute guardrail labels.")
-            analysis_end_date_used = gr_params['start_date']
-        if gr_params['iwr'] is None:
-            raise ValueError("Initial withdrawal rate unavailable for guardrail label calculation.")
-
-        # Initial withdrawal rate and first-period spending (already computed above for target label)
-        first_month_spending = gr_params['initial_value'] * gr_params['iwr'] / 12.0
-
-        # Compute WRs at start of retirement using retirement start date as analysis end date
-        upper_res = utils.get_wr_for_fixed_success_rate(
-            df=shiller_df,
-            desired_success_rate=gr_params['upper_sr'],
-            num_months=num_months,
-            analysis_start_date=gr_params['analysis_start_date'],
-            analysis_end_date=analysis_end_date_used,
-            initial_value=gr_params['initial_value'],
-            stock_pct=gr_params['stock_pct'],
-            tolerance=0.001,
-            max_iterations=50,
-            verbose=False,
-            cashflows=cashflows,
-        )
-        lower_res = utils.get_wr_for_fixed_success_rate(
-            df=shiller_df,
-            desired_success_rate=gr_params['lower_sr'],
-            num_months=num_months,
-            analysis_start_date=gr_params['analysis_start_date'],
-            analysis_end_date=analysis_end_date_used,
-            initial_value=gr_params['initial_value'],
-            stock_pct=gr_params['stock_pct'],
-            tolerance=0.001,
-            max_iterations=50,
-            verbose=False,
-            cashflows=cashflows,
-        )
-
-        upper_wr = float(upper_res['withdrawal_rate']) if upper_res['withdrawal_rate'] is not None else None
-        lower_wr = float(lower_res['withdrawal_rate']) if lower_res['withdrawal_rate'] is not None else None
-
-        upper_pv = first_month_spending / upper_wr * 12 if (upper_wr is not None and upper_wr > 0) else None
-        lower_pv = first_month_spending / lower_wr * 12 if (lower_wr is not None and lower_wr > 0) else None
-
-        st.session_state['upper_label_suffix'] = f" (Initial PV: ${upper_pv:,.0f})" if upper_pv is not None else " (Initial PV: N/A)"
-        st.session_state['lower_label_suffix'] = f" (Initial PV: ${lower_pv:,.0f})" if lower_pv is not None else " (Initial PV: N/A)"
-        st.session_state['guardrail_params'] = gr_params
+        display.update_guardrail_dynamic_labels(gr_params=gr_params, is_guidance=is_guidance, cashflows=cashflows)
 
     upper_label_suffix = st.session_state.get('upper_label_suffix', " (Initial PV: N/A)")
     lower_label_suffix = st.session_state.get('lower_label_suffix', " (Initial PV: N/A)")
@@ -461,6 +365,7 @@ upper_adjustment_fraction = st.sidebar.slider(
          "to the target, and our new withdrawal rate will be based on a 95% chance of success.\n\nSetting this higher "
          "is more aggressive, and will cause you to make larger spending increases when you hit the upper guardrail."
 )
+
 lower_adjustment_fraction = st.sidebar.slider(
     "Lower Adjustment Fraction",
     value=0.1,
@@ -659,6 +564,9 @@ if is_guidance:
             lower_adjustment_fraction=lower_adjustment_fraction,
             cashflows=cashflows
         )
+
+        # TODO for https://github.com/rogercost/fire-guardrails/issues/13
+        # Create a nice tabular or graphic display, move logic to display module
 
         def fmt_money(x):
             # Escape the dollar sign so Streamlit Markdown doesn't interpret $...$ as LaTeX math
