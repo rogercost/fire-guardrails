@@ -275,7 +275,7 @@ try:
     if iwr is not None:
         iwr_label_suffix = f" (Initial WR: {iwr*100:.2f}%)"
         if is_guidance:
-            auto_current_spending = float(initial_value) * float(iwr) / 12.0
+            auto_current_spending = round(float(initial_value) * float(iwr) / 12.0)
         else:
             auto_current_spending = None
     else:
@@ -296,21 +296,19 @@ target_success_rate = st.sidebar.slider(
     key="target_success_rate"
 )
 
-# New input used by Guidance Mode (hidden/disabled in Simulation Mode)
+# Current spending input is primarily used in Guidance Mode but remains visible in Simulation Mode
 if auto_current_spending is not None:
     st.session_state["_current_spending_auto_value"] = auto_current_spending
     current_value = st.session_state.get("current_monthly_spending")
     if st.session_state.get("_current_spending_overridden") and current_value is not None and np.isclose(
-        float(current_value), float(auto_current_spending), rtol=0.0, atol=0.005
+        float(current_value), float(auto_current_spending), rtol=0.0, atol=0.5
     ):
         st.session_state["_current_spending_overridden"] = False
     if not st.session_state.get("_current_spending_overridden"):
-        if current_value is None or not np.isclose(float(current_value), float(auto_current_spending), rtol=0.0, atol=0.005):
+        if current_value is None or not np.isclose(float(current_value), float(auto_current_spending), rtol=0.0, atol=0.5):
             st.session_state["current_monthly_spending"] = float(auto_current_spending)
 else:
     st.session_state["_current_spending_auto_value"] = None
-    if not is_guidance:
-        st.session_state["_current_spending_overridden"] = False
 
 if "current_monthly_spending" not in st.session_state or st.session_state["current_monthly_spending"] is None:
     st.session_state["current_monthly_spending"] = 0.0
@@ -319,9 +317,8 @@ current_monthly_spending = st.sidebar.number_input(
     "Current Monthly Spending",
     min_value=0.0,
     step=10.0,
-    format="%.2f",
+    format="%.0f",
     help="Your current monthly spending level. Used only in Guidance Mode to compute guardrail values and hypothetical adjustments.",
-    disabled=not is_guidance,
     key="current_monthly_spending",
     on_change=_mark_current_spending_overridden,
 )
