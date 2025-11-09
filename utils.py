@@ -338,6 +338,7 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
 def get_guardrail_withdrawals(df, start_date, end_date,
                               analysis_start_date='1871-01-01',
                               initial_value=1_000_000,
+                              initial_monthly_spending=3_300,
                               stock_pct=0.75,
                               target_success_rate=0.90,
                               upper_guardrail_success=1.00,
@@ -367,6 +368,7 @@ def get_guardrail_withdrawals(df, start_date, end_date,
     pd.DataFrame
         A dataframe with Date, Withdrawal, and diagnostic columns.
     """
+    print(f"Invoked with initial spending {initial_monthly_spending}")
     # Filter to analysis period
     mask = (df["Date"] >= pd.to_datetime(start_date)) & (df["Date"] <= pd.to_datetime(end_date))
     subset = df[mask].copy().reset_index(drop=True)
@@ -389,29 +391,8 @@ def get_guardrail_withdrawals(df, start_date, end_date,
     # Initialize results storage
     results = []
 
-    # Get the initial withdrawal rate based on the target success rate
-    #
-    initial_wr = get_wr_for_fixed_success_rate(
-        df=df,
-        desired_success_rate=target_success_rate,
-        num_months=len(subset),
-        analysis_start_date=analysis_start_date,
-        analysis_end_date=start_date,  # We're starting this in the past!
-        initial_value=initial_value,
-        stock_pct=stock_pct,
-        tolerance=0.001,
-        max_iterations=50,
-        verbose=False,
-        cashflows=cashflows,
-        cashflow_schedule=monthly_cashflows,
-    )['withdrawal_rate']
-
-    if verbose:
-        print(f"Initial withdrawal rate: {(initial_wr * 100):.2f}%")
-
-    # State variables
     current_portfolio_value = initial_value
-    previous_total_spending = initial_value * initial_wr / 12
+    previous_total_spending = initial_monthly_spending
     cap_amount = (
         previous_total_spending * float(spending_cap)
         if spending_cap is not None else None
@@ -498,18 +479,25 @@ def get_guardrail_withdrawals(df, start_date, end_date,
 
                 # Step 4: Calculate proposed spending adjustment
                 if hit_upper:
+                    if len(results) == 0:
+                        print("Hit upper")
                     desired_success_rate = upper_guardrail_success + upper_adjustment_fraction * (target_success_rate - upper_guardrail_success)
                     new_wr = get_withdrawal_rate(success_rate=desired_success_rate)
                     new_proposed_spending = current_portfolio_value * new_wr / 12
                     guardrail_hit = "UPPER"
 
                 elif hit_lower:
+                    if len(results) == 0:
+                        print("Hit lower")
                     desired_success_rate = lower_guardrail_success + lower_adjustment_fraction * (target_success_rate - lower_guardrail_success)
                     new_wr = get_withdrawal_rate(success_rate=desired_success_rate)
                     new_proposed_spending = current_portfolio_value * new_wr / 12
                     guardrail_hit = "LOWER"
 
                 else:
+
+                    if len(results) == 0:
+                        print(f"Hit no guardrail, setting new_proposed_spending to {previous_total_spending}")
                     new_proposed_spending = previous_total_spending
                     guardrail_hit = "NONE"
 
@@ -528,6 +516,8 @@ def get_guardrail_withdrawals(df, start_date, end_date,
 
                 if percent_change > adjustment_threshold:
                     # Make the adjustment
+                    if len(results) == 0:
+                        print(f"Setting spending_target to bounded_spending value of {bounded_spending}")
                     spending_target = bounded_spending
                     adjustment_made = True
                 else:
@@ -550,6 +540,9 @@ def get_guardrail_withdrawals(df, start_date, end_date,
             percent_change = 0.0
             adjustment_allowed = False
 
+        if len(results) == 0:
+            print(f"First spending target amount: {spending_target}, prev total spending is now {previous_total_spending}")
+
         withdrawal_amount = spending_target - current_cashflow
         if withdrawal_amount < 0.0:
             withdrawal_amount = 0.0
@@ -558,6 +551,9 @@ def get_guardrail_withdrawals(df, start_date, end_date,
         # Fixed path withdrawal for this month
         fixed_actual_withdrawal = 0.0 if fixed_depleted else max(fixed_total_spending - current_cashflow, 0.0)
         fixed_total_income = fixed_actual_withdrawal + current_cashflow
+
+        if len(results) == 0:
+            print(f"First total income amount: {total_income}")
 
         # Store results
         results.append({
@@ -611,7 +607,7 @@ def compute_guardrail_guidance_snapshot(
     duration_months,
     analysis_start_date="1871-01-01",
     current_portfolio_value=1_000_000.0,
-    current_monthly_spending=40_000.0,
+    initial_monthly_spending=3_300.0,
     stock_pct=0.75,
     target_success_rate=0.90,
     upper_guardrail_success=1.00,
@@ -729,7 +725,7 @@ def compute_guardrail_guidance_snapshot(
     )
 
     # Guardrail PVs where CURRENT spending equals the WR for upper/lower SRs (matches simulation logic)
-    use_spending = float(current_monthly_spending) if current_monthly_spending is not None else None
+    use_spending = float(initial_monthly_spending) if initial_monthly_spending is not None else None
 
     if upper_wr is not None and upper_wr > 0 and use_spending is not None:
         upper_guardrail_value = use_spending / upper_wr * 12.0
@@ -783,11 +779,11 @@ def compute_guardrail_guidance_snapshot(
 
     # Percent change relative to CURRENT spending
     def _pct_change(new_amt):
-        if new_amt is None or float(current_monthly_spending) == 0.0:
+        if new_amt is None or float(initial_monthly_spending) == 0.0:
             return None
-        return (float(new_amt) - float(current_monthly_spending)) / float(current_monthly_spending)
+        return (float(new_amt) - float(initial_monthly_spending)) / float(initial_monthly_spending)
 
-    implied_wr = (float(current_monthly_spending) * 12.0 / float(current_portfolio_value)) if float(current_portfolio_value) > 0 else None
+    implied_wr = (float(initial_monthly_spending) * 12.0 / float(current_portfolio_value)) if float(current_portfolio_value) > 0 else None
     target_monthly_spending = (float(current_portfolio_value) * target_wr / 12.0) if target_wr is not None else None
     target_monthly_withdrawal = None
     if target_monthly_spending is not None:

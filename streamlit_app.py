@@ -296,27 +296,28 @@ target_success_rate = st.sidebar.slider(
 # Current spending input is primarily used in Guidance Mode but remains visible in Simulation Mode
 if auto_current_spending is not None:
     st.session_state["_current_spending_auto_value"] = auto_current_spending
-    current_value = st.session_state.get("current_monthly_spending")
+    current_value = st.session_state.get("initial_monthly_spending")
     if st.session_state.get("_current_spending_overridden") and current_value is not None and np.isclose(
         float(current_value), float(auto_current_spending), rtol=0.0, atol=0.5
     ):
         st.session_state["_current_spending_overridden"] = False
     if not st.session_state.get("_current_spending_overridden"):
         if current_value is None or not np.isclose(float(current_value), float(auto_current_spending), rtol=0.0, atol=0.5):
-            st.session_state["current_monthly_spending"] = float(auto_current_spending)
+            st.session_state["initial_monthly_spending"] = float(auto_current_spending)
 else:
     st.session_state["_current_spending_auto_value"] = None
 
-if "current_monthly_spending" not in st.session_state or st.session_state["current_monthly_spending"] is None:
-    st.session_state["current_monthly_spending"] = 0.0
+if "initial_monthly_spending" not in st.session_state or st.session_state["initial_monthly_spending"] is None:
+    st.session_state["initial_monthly_spending"] = 0.0
 
-current_monthly_spending = st.sidebar.number_input(
-    "Current Monthly Spending",
+initial_monthly_spending = st.sidebar.number_input(
+    "Initial Monthly Spending",
     min_value=0.0,
     step=10.0,
     format="%.0f",
-    help="Your current monthly spending level. Used only in Guidance Mode to compute guardrail values and hypothetical adjustments.",
-    key="current_monthly_spending",
+    help="The initial monthly spending level for the retirement simulation, which will be used until a guardrail is hit.\n\n"
+         "Automatically updates as you change the Target Withdrawal Rate, but can be set to a custom value if desired.\n\n",
+    key="initial_monthly_spending",
     on_change=_mark_current_spending_overridden,
 )
 # Compute dynamic labels for Guardrail Success Rates showing initial (first period) PVs
@@ -912,7 +913,7 @@ if is_guidance:
             duration_months=int(retirement_duration_months),
             analysis_start_date=analysis_start_date,
             current_portfolio_value=initial_value,
-            current_monthly_spending=st.session_state.get("current_monthly_spending", 40000.0),
+            initial_monthly_spending=initial_monthly_spending,
             stock_pct=stock_pct,
             target_success_rate=target_success_rate,
             upper_guardrail_success=upper_guardrail_success,
@@ -1037,6 +1038,7 @@ elif st.sidebar.button(
         end_date=computed_end_date,
         analysis_start_date=analysis_start_date,
         initial_value=initial_value,
+        initial_monthly_spending=initial_monthly_spending,
         stock_pct=stock_pct,
         target_success_rate=target_success_rate,
         upper_guardrail_success=upper_guardrail_success,
