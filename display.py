@@ -73,11 +73,8 @@ def update_guardrail_dynamic_labels(gr_params: dict, is_guidance: bool, cashflow
         if num_months <= 0:
             raise ValueError("Invalid retirement duration to compute guardrail labels.")
         analysis_end_date_used = gr_params['start_date']
-    if gr_params['iwr'] is None:
-        raise ValueError("Initial withdrawal rate unavailable for guardrail label calculation.")
-
-    # Initial withdrawal rate and first-period spending (already computed above for target label)
-    first_month_spending = gr_params['initial_value'] * gr_params['iwr'] / 12.0
+    # First-period spending used to determine portfolio values that align with the guardrails
+    first_month_spending = float(gr_params.get('initial_spending', 0.0))
 
     # Compute WRs at start of retirement using retirement start date as analysis end date
     upper_res = utils.get_wr_for_fixed_success_rate(

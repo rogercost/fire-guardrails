@@ -200,6 +200,7 @@ try:
         'upper_sr': float(st.session_state.get("upper_guardrail_success", 1.00)),
         'lower_sr': float(st.session_state.get("lower_guardrail_success", 0.75)),
         'iwr': float(st.session_state.get('iwr_value')) if st.session_state.get('iwr_value') is not None else None,
+        'initial_spending': float(st.session_state.get("initial_monthly_spending", 0.0)),
         'cashflows': controls.cashflows_to_tuple(cashflows),
     }
 
