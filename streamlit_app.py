@@ -1,4 +1,5 @@
 import datetime
+import calendar
 
 import streamlit as st
 import pandas as pd
@@ -61,16 +62,67 @@ def _unmark_initial_spending_overridden() -> None:
 st.sidebar.header("Simulation Parameters")
 
 # Date Inputs
+
+def _sidebar_month_year_selector(
+    label: str,
+    *,
+    default_date: datetime.date,
+    min_date: datetime.date,
+    max_date: datetime.date,
+    key_prefix: str,
+    disabled: bool = False,
+    help_text: Optional[str] = None,
+) -> datetime.date:
+    """Render year and month select boxes in the sidebar and return the first day of that month."""
+
+    if default_date < min_date:
+        default_date = min_date
+    elif default_date > max_date:
+        default_date = max_date
+
+    year_options = list(range(min_date.year, max_date.year + 1))
+    default_year = default_date.year
+    selected_year = st.sidebar.selectbox(
+        label,
+        year_options,
+        index=year_options.index(default_year),
+        key=f"{key_prefix}_year",
+        disabled=disabled,
+        help=help_text,
+        on_change=_unmark_initial_spending_overridden,
+    )
+
+    month_start = min_date.month if selected_year == min_date.year else 1
+    month_end = max_date.month if selected_year == max_date.year else 12
+    month_options = list(range(month_start, month_end + 1))
+
+    default_month = default_date.month
+    if default_month not in month_options:
+        default_month = month_options[0]
+
+    selected_month = st.sidebar.selectbox(
+        "Month",
+        month_options,
+        index=month_options.index(default_month),
+        key=f"{key_prefix}_month",
+        disabled=disabled,
+        format_func=lambda m: calendar.month_name[m],
+        on_change=_unmark_initial_spending_overridden,
+    )
+
+    return datetime.date(selected_year, selected_month, 1)
+
+
 today_date = datetime.date.today()
-start_date = st.sidebar.date_input(
+start_date = _sidebar_month_year_selector(
     "Retirement Start Date",
-    value=today_date if is_guidance else datetime.date(1968, 4, 1),
-    min_value=datetime.date(1871, 1, 1),
-    max_value=today_date,
-    help="First retirement month used for withdrawals.\n\nIn Simulation Mode, the historical simulations begin from this date.\n\n"
-         "In Guidance Mode, this defaults to today. Even if retirement is already underway, the guidance is forward looking from today.",
-    disabled=is_guidance,  # In Guidance Mode, this is fixed to today
-    on_change=_unmark_initial_spending_overridden,
+    default_date=today_date if is_guidance else datetime.date(1968, 4, 1),
+    min_date=datetime.date(1871, 1, 1),
+    max_date=today_date,
+    key_prefix="retirement_start",
+    disabled=is_guidance,
+    help_text="First retirement month used for withdrawals.\n\nIn Simulation Mode, the historical simulations begin from this date.\n\n"
+              "In Guidance Mode, this defaults to today. Even if retirement is already underway, the guidance is forward looking from today.",
 )
 
 retirement_duration_months = st.sidebar.number_input(
@@ -83,15 +135,15 @@ retirement_duration_months = st.sidebar.number_input(
     help="Length of retirement in months.\n\nIn Guidance Mode, this should be the remaining number of months, if retirement is already underway."
 )
 
-analysis_start_date = st.sidebar.date_input(
+analysis_start_date = _sidebar_month_year_selector(
     "Historical Analysis Start Date",
-    value=datetime.date(1871, 1, 1),
-    min_value=datetime.date(1871, 1, 1),
-    max_value=datetime.date.today(),
-    on_change=_unmark_initial_spending_overridden,
-    help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nNote that when running historical "
-         "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
-         "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!"
+    default_date=datetime.date(1871, 1, 1),
+    min_date=datetime.date(1871, 1, 1),
+    max_date=today_date,
+    key_prefix="analysis_start",
+    help_text="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nNote that when running historical "
+             "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
+             "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!",
 )
 
 # Numeric Inputs
