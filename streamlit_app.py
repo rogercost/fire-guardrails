@@ -39,7 +39,9 @@ if "_initial_spending_overridden" not in st.session_state:
 if "_initial_spending_auto_value" not in st.session_state:
     st.session_state["_initial_spending_auto_value"] = None
 
-def _render_sidebar_label(text: str, color: Optional[str] = None) -> None:
+def _render_sidebar_label(
+    text: str, color: Optional[str] = None, *, container=None
+) -> None:
     style = (
         "margin: 0 0 0.25rem 0;"
         " font-size: var(--font-size-sm, 0.875rem);"
@@ -48,7 +50,8 @@ def _render_sidebar_label(text: str, color: Optional[str] = None) -> None:
     )
     if color:
         style += f" color: {color};"
-    st.sidebar.markdown(f"<div style=\"{style}\">{text}</div>", unsafe_allow_html=True)
+    target = container if container is not None else st.sidebar
+    target.markdown(f"<div style=\"{style}\">{text}</div>", unsafe_allow_html=True)
 
 def _mark_initial_spending_overridden() -> None:
     """Flag that the current spending widget has been manually overridden."""
@@ -82,33 +85,52 @@ def _sidebar_month_year_selector(
 
     year_options = list(range(min_date.year, max_date.year + 1))
     default_year = default_date.year
-    selected_year = st.sidebar.selectbox(
-        label,
-        year_options,
-        index=year_options.index(default_year),
-        key=f"{key_prefix}_year",
-        disabled=disabled,
-        help=help_text,
-        on_change=_unmark_initial_spending_overridden,
-    )
+
+    _render_sidebar_label(label)
+    year_column, month_column = st.sidebar.columns(2, gap="small")
+
+    with year_column:
+        _render_sidebar_label("Year", container=year_column)
+        selected_year = year_column.selectbox(
+            "",
+            year_options,
+            index=year_options.index(default_year),
+            key=f"{key_prefix}_year",
+            disabled=disabled,
+            help=help_text,
+            on_change=_unmark_initial_spending_overridden,
+            label_visibility="collapsed",
+        )
 
     month_start = min_date.month if selected_year == min_date.year else 1
     month_end = max_date.month if selected_year == max_date.year else 12
     month_options = list(range(month_start, month_end + 1))
 
+    month_key = f"{key_prefix}_month"
     default_month = default_date.month
     if default_month not in month_options:
         default_month = month_options[0]
 
-    selected_month = st.sidebar.selectbox(
-        "Month",
-        month_options,
-        index=month_options.index(default_month),
-        key=f"{key_prefix}_month",
-        disabled=disabled,
-        format_func=lambda m: calendar.month_name[m],
-        on_change=_unmark_initial_spending_overridden,
-    )
+    stored_month = st.session_state.get(month_key, default_month)
+    if stored_month not in month_options:
+        if isinstance(stored_month, int):
+            stored_month = min(max(stored_month, month_options[0]), month_options[-1])
+        else:
+            stored_month = month_options[0]
+        st.session_state[month_key] = stored_month
+
+    with month_column:
+        _render_sidebar_label("Month", container=month_column)
+        selected_month = month_column.selectbox(
+            "",
+            month_options,
+            index=month_options.index(stored_month),
+            key=month_key,
+            disabled=disabled,
+            format_func=lambda m: calendar.month_name[m],
+            on_change=_unmark_initial_spending_overridden,
+            label_visibility="collapsed",
+        )
 
     return datetime.date(selected_year, selected_month, 1)
 
