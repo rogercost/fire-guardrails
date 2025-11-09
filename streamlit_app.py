@@ -6,6 +6,7 @@ import numpy as np
 
 import utils
 import display
+import controls
 
 st.set_page_config(layout="wide", page_title="Guardrail Withdrawal Simulator")
 
@@ -23,7 +24,6 @@ is_guidance = (mode == "Guidance Mode")
 title_ph = st.empty()
 desc_ph = st.empty()
 
-
 if "show_advanced_modal" not in st.session_state:
     st.session_state["show_advanced_modal"] = False
 if "spending_cap_option" not in st.session_state:
@@ -36,55 +36,6 @@ if "_current_spending_overridden" not in st.session_state:
     st.session_state["_current_spending_overridden"] = False
 if "_current_spending_auto_value" not in st.session_state:
     st.session_state["_current_spending_auto_value"] = None
-
-
-# Helpers for cashflow management
-def _sanitize_cashflows(raw_cashflows):
-    sanitized = []
-    for flow in raw_cashflows or []:
-        try:
-            start = int(flow.get("start_month", 0))
-            end = int(flow.get("end_month", 0))
-            amount = float(flow.get("amount", 0.0))
-        except (AttributeError, TypeError, ValueError):
-            continue
-
-        if end < start:
-            continue
-
-        sanitized.append({
-            "start_month": start,
-            "end_month": end,
-            "amount": amount,
-        })
-    return sanitized
-
-
-def _cashflows_to_tuple(cashflows):
-    return tuple((cf["start_month"], cf["end_month"], cf["amount"]) for cf in cashflows)
-
-
-def _clear_cashflow_widget_state(start_idx: int = 0) -> None:
-    """Remove cached widget values for cashflows starting from ``start_idx``."""
-
-    prefixes = (
-        "cf_start_",
-        "cf_end_",
-        "cf_amount_",
-        "cf_label_",
-    )
-
-    keys_to_drop = []
-    for key in list(st.session_state.keys()):
-        for prefix in prefixes:
-            if key.startswith(prefix):
-                suffix = key[len(prefix) :]
-                if suffix.isdigit() and int(suffix) >= start_idx:
-                    keys_to_drop.append(key)
-                break
-
-    for key in keys_to_drop:
-        del st.session_state[key]
 
 
 def _mark_current_spending_overridden() -> None:
@@ -139,84 +90,12 @@ stock_pct = st.sidebar.slider(
     help="Fraction of the portfolio allocated to US stocks; remainder to 10Y treasuries."
 )
 
-# Ensure widget defaults for existing cashflows remain synchronized prior to rendering inputs
-def _ensure_cashflow_widget_state(idx: int, flow: dict) -> None:
-    start_key = f"cf_start_{idx}"
-    end_key = f"cf_end_{idx}"
-    amount_key = f"cf_amount_{idx}"
-    label_key = f"cf_label_{idx}"
-
-    default_start = int(flow.get("start_month", 0))
-    default_end = int(flow.get("end_month", default_start))
-    default_amount = float(flow.get("amount", 0.0))
-    default_label = str(flow.get("label") or f"Cashflow {idx + 1}")
-
-    if start_key not in st.session_state:
-        st.session_state[start_key] = default_start
-
-    if end_key not in st.session_state:
-        st.session_state[end_key] = max(default_end, st.session_state[start_key])
-    elif st.session_state[end_key] < st.session_state[start_key]:
-        st.session_state[end_key] = st.session_state[start_key]
-
-    if amount_key not in st.session_state:
-        st.session_state[amount_key] = default_amount
-
-    if label_key not in st.session_state or not str(st.session_state[label_key]).strip():
-        st.session_state[label_key] = default_label
-
-
-def _sync_cashflows_from_widgets() -> None:
-    flows = st.session_state.get("cashflows")
-    if not flows:
-        return
-
-    for idx, flow in enumerate(flows):
-        start_key = f"cf_start_{idx}"
-        end_key = f"cf_end_{idx}"
-        amount_key = f"cf_amount_{idx}"
-        label_key = f"cf_label_{idx}"
-
-        try:
-            start_val = int(st.session_state.get(start_key, flow.get("start_month", 0)))
-        except (TypeError, ValueError):
-            start_val = int(flow.get("start_month", 0))
-
-        try:
-            end_val = int(st.session_state.get(end_key, flow.get("end_month", start_val)))
-        except (TypeError, ValueError):
-            end_val = int(flow.get("end_month", start_val))
-
-        if end_val < start_val:
-            end_val = start_val
-
-        try:
-            amount_val = float(st.session_state.get(amount_key, flow.get("amount", 0.0)))
-        except (TypeError, ValueError):
-            amount_val = float(flow.get("amount", 0.0))
-
-        label_raw = st.session_state.get(label_key, flow.get("label") or f"Cashflow {idx + 1}")
-        label_val = str(label_raw).strip() or f"Cashflow {idx + 1}"
-
-        st.session_state[start_key] = start_val
-        st.session_state[end_key] = end_val
-        st.session_state[amount_key] = amount_val
-        st.session_state[label_key] = label_val
-
-        flows[idx] = {
-            "start_month": start_val,
-            "end_month": end_val,
-            "amount": amount_val,
-            "label": label_val,
-        }
-
-
 cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 201, 5)]
 floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 24, -5)]
 
-_sync_cashflows_from_widgets()
+controls.sync_cashflows_from_widgets()
 
-cashflows = _sanitize_cashflows(st.session_state.get("cashflows"))
+cashflows = controls.sanitize_cashflows(st.session_state.get("cashflows"))
 
 # Compute Retirement End Date for Simulation Mode from duration
 computed_end_date = (pd.to_datetime(start_date) + pd.DateOffset(months=int(retirement_duration_months) - 1)).date() if not is_guidance else None
@@ -231,7 +110,7 @@ iwr_params = {
     'stock_pct': float(stock_pct),
     # Use current target_success_rate if available, otherwise default of 0.90
     'desired_success_rate': float(st.session_state.get('target_success_rate', 0.90)),
-    'cashflows': _cashflows_to_tuple(cashflows),
+    'cashflows': controls.cashflows_to_tuple(cashflows),
 }
 iwr_label_suffix = ""
 
@@ -308,7 +187,7 @@ try:
         'upper_sr': float(st.session_state.get("upper_guardrail_success", 1.00)),
         'lower_sr': float(st.session_state.get("lower_guardrail_success", 0.75)),
         'iwr': float(st.session_state.get('iwr_value')) if st.session_state.get('iwr_value') is not None else None,
-        'cashflows': _cashflows_to_tuple(cashflows),
+        'cashflows': controls.cashflows_to_tuple(cashflows),
     }
 
     if ('guardrail_params' not in st.session_state) or (st.session_state['guardrail_params'] != gr_params):
@@ -430,7 +309,7 @@ sim_params = {
     'adjustment_frequency': adjustment_frequency,
     'spending_cap_multiplier': spending_cap_multiplier,
     'spending_floor_multiplier': spending_floor_multiplier,
-    'cashflows': _cashflows_to_tuple(cashflows),
+    'cashflows': controls.cashflows_to_tuple(cashflows),
 }
 last_run_params = st.session_state.get('last_run_params')
 dirty = last_run_params is not None and last_run_params != sim_params
@@ -481,7 +360,7 @@ with st.sidebar.expander("Advanced Controls"):
         st.rerun()
 
     for idx, flow in enumerate(st.session_state["cashflows"]):
-        _ensure_cashflow_widget_state(idx, flow)
+        controls.ensure_cashflow_widget_state(idx, flow)
 
         name_col, remove_col = st.columns([1, 0.15])
         label_key = f"cf_label_{idx}"
@@ -493,7 +372,7 @@ with st.sidebar.expander("Advanced Controls"):
         )
         if remove_col.button("✕", key=f"cf_remove_{idx}"):
             st.session_state["cashflows"].pop(idx)
-            _clear_cashflow_widget_state(idx)
+            controls.clear_cashflow_widget_state(idx)
             st.rerun()
 
         col_start, col_end, col_amount = st.columns(3)
@@ -512,7 +391,7 @@ with st.sidebar.expander("Advanced Controls"):
         col_amount.number_input(
             "Amount ($/mo)",
             step=50.0,
-            format="%0.2f",
+            format="%0.0f",
             key=f"cf_amount_{idx}",
         )
 
