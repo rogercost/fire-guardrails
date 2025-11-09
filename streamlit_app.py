@@ -1,6 +1,5 @@
 import calendar
 import datetime
-import html
 
 import streamlit as st
 import pandas as pd
@@ -40,38 +39,16 @@ if "_initial_spending_overridden" not in st.session_state:
 if "_initial_spending_auto_value" not in st.session_state:
     st.session_state["_initial_spending_auto_value"] = None
 
-def _render_sidebar_label(
-    text: str,
-    color: Optional[str] = None,
-    *,
-    container=None,
-    help_text: Optional[str] = None,
-) -> None:
+def _render_sidebar_label(text: str, color: Optional[str] = None) -> None:
     style = (
         "margin: 0 0 0.25rem 0;"
         " font-size: var(--font-size-sm, 0.875rem);"
         " font-weight: var(--font-weight-normal, 400);"
         " line-height: var(--line-height-sm, 1.4);"
-        " display: flex;"
-        " align-items: center;"
-        " gap: 0.25rem;"
-        " justify-content: space-between;"
-        " width: 100%;"
     )
     if color:
         style += f" color: {color};"
-    help_html = ""
-    if help_text:
-        tooltip = html.escape(help_text).replace("\n", "&#10;")
-        help_html = (
-            "<span style=\"font-size: 0.75rem; color: var(--secondary-text-color, #6c757d);"
-            " cursor: help; margin-left: auto;\" title=\"{tooltip}\">(?)</span>"
-        )
-    target = container if container is not None else st.sidebar
-    target.markdown(
-        f"<div style=\"{style}\">{text}{help_html}</div>",
-        unsafe_allow_html=True,
-    )
+    st.sidebar.markdown(f"<div style=\"{style}\">{text}</div>", unsafe_allow_html=True)
 
 def _mark_initial_spending_overridden() -> None:
     """Flag that the current spending widget has been manually overridden."""
@@ -103,57 +80,81 @@ def _sidebar_month_year_selector(
     elif default_date > max_date:
         default_date = max_date
 
+    year_key = f"{key_prefix}_year"
+    month_key = f"{key_prefix}_month"
+    saved_key = f"{key_prefix}_saved_selection"
+
+    if disabled:
+        previous_year = st.session_state.get(year_key)
+        previous_month = st.session_state.get(month_key)
+        if previous_year is not None and previous_month is not None:
+            st.session_state[saved_key] = (previous_year, previous_month)
+        st.session_state.pop(year_key, None)
+        st.session_state.pop(month_key, None)
+        restored_selection: Optional[tuple[int, int]] = None
+    else:
+        restored_selection = None
+        if saved_key in st.session_state and (
+            year_key not in st.session_state or month_key not in st.session_state
+        ):
+            restored_selection = st.session_state.pop(saved_key)
+
     year_options = list(range(min_date.year, max_date.year + 1))
     default_year = default_date.year
 
-    _render_sidebar_label(label, help_text=help_text)
-    year_column, month_column = st.sidebar.columns(2, gap="small")
+    container = st.sidebar.container()
+    year_column, month_column = container.columns(2, gap="small")
+
+    desired_year = default_year if disabled else st.session_state.get(year_key)
+    if desired_year is None and restored_selection is not None:
+        desired_year = restored_selection[0]
+    if desired_year is None:
+        desired_year = default_year
+    if desired_year not in year_options:
+        desired_year = max(min(desired_year, year_options[-1]), year_options[0])
+
+    if not disabled:
+        st.session_state[year_key] = desired_year
 
     with year_column:
-        _render_sidebar_label("Year", container=year_column)
-        year_key = f"{key_prefix}_year"
-        if disabled or st.session_state.get(year_key) not in year_options:
-            st.session_state.pop(year_key, None)
         selected_year = year_column.selectbox(
-            "",
+            label,
             year_options,
-            index=year_options.index(st.session_state.get(year_key, default_year)),
+            index=year_options.index(desired_year),
             key=year_key,
             disabled=disabled,
+            help=help_text,
             on_change=_unmark_initial_spending_overridden,
-            label_visibility="collapsed",
         )
 
     month_start = min_date.month if selected_year == min_date.year else 1
     month_end = max_date.month if selected_year == max_date.year else 12
     month_options = list(range(month_start, month_end + 1))
 
-    month_key = f"{key_prefix}_month"
     default_month = default_date.month
     if default_month not in month_options:
         default_month = month_options[0]
 
-    if disabled or st.session_state.get(month_key) not in month_options:
-        st.session_state.pop(month_key, None)
+    desired_month = default_month if disabled else st.session_state.get(month_key)
+    if desired_month is None and restored_selection is not None:
+        desired_month = restored_selection[1]
+    if desired_month is None:
+        desired_month = default_month
+    if desired_month not in month_options:
+        desired_month = min(max(desired_month, month_options[0]), month_options[-1])
 
-    stored_month = st.session_state.get(month_key, default_month)
-    if stored_month not in month_options:
-        if default_month in month_options:
-            stored_month = default_month
-        else:
-            stored_month = min(max(default_month, month_options[0]), month_options[-1])
+    if not disabled:
+        st.session_state[month_key] = desired_month
 
     with month_column:
-        _render_sidebar_label("Month", container=month_column)
         selected_month = month_column.selectbox(
-            "",
+            "Month",
             month_options,
-            index=month_options.index(stored_month),
+            index=month_options.index(desired_month),
             key=month_key,
             disabled=disabled,
             format_func=lambda m: calendar.month_name[m],
             on_change=_unmark_initial_spending_overridden,
-            label_visibility="collapsed",
         )
 
     return datetime.date(selected_year, selected_month, 1)
