@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import gzip
 import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -176,8 +177,9 @@ class Settings:
         }
 
     def to_base64(self) -> str:
-        payload = json.dumps(self.to_dict(), separators=(",", ":"))
-        encoded = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("utf-8")
+        payload = json.dumps(self.to_dict(), separators=(",", ":")).encode("utf-8")
+        compressed = gzip.compress(payload)
+        encoded = base64.urlsafe_b64encode(compressed).decode("utf-8")
         return encoded.rstrip("=")
 
     @classmethod
@@ -217,7 +219,8 @@ class Settings:
     def from_base64(cls, payload: str) -> "Settings":
         padding = "=" * (-len(payload) % 4)
         decoded = base64.urlsafe_b64decode((payload + padding).encode("utf-8"))
-        data = json.loads(decoded.decode("utf-8"))
+        decompressed = gzip.decompress(decoded)
+        data = json.loads(decompressed.decode("utf-8"))
         if not isinstance(data, dict):
             raise ValueError("Decoded configuration must be a JSON object.")
         return cls.from_dict(data)
