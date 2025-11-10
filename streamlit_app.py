@@ -108,13 +108,34 @@ if settings_error:
 
 # Date Inputs
 today_date = datetime.date.today()
-if is_guidance:
-    st.session_state["retirement_start_date"] = today_date
 start_date_default = datetime.date(1968, 4, 1)
-start_date_value = today_date if is_guidance else _get_date_state("retirement_start_date", start_date_default)
+start_date_key = "retirement_start_date"
+sim_start_key = "_simulation_retirement_start_date"
+previous_mode_key = "_previous_mode"
+
+if sim_start_key not in st.session_state:
+    st.session_state[sim_start_key] = _get_date_state(start_date_key, start_date_default)
+
+previous_mode = st.session_state.get(previous_mode_key)
+if previous_mode != mode:
+    if is_guidance:
+        st.session_state[sim_start_key] = _get_date_state(start_date_key, start_date_default)
+        st.session_state[start_date_key] = today_date
+    else:
+        restored_start = st.session_state.get(sim_start_key, start_date_default)
+        if not isinstance(restored_start, datetime.date):
+            restored_start = _get_date_state(start_date_key, start_date_default)
+        st.session_state[start_date_key] = restored_start
+    st.session_state[previous_mode_key] = mode
+
+if start_date_key not in st.session_state:
+    default_start = today_date if is_guidance else st.session_state.get(sim_start_key, start_date_default)
+    if not isinstance(default_start, datetime.date):
+        default_start = start_date_default
+    st.session_state[start_date_key] = default_start
+
 start_date = st.sidebar.date_input(
     "Retirement Start Date",
-    value=start_date_value,
     min_value=datetime.date(1871, 1, 1),
     max_value=today_date,
     help="First retirement date used for withdrawals.\n\nCurrently, only the year and month are used, due to the monthly nature of the Shiller "
@@ -123,8 +144,15 @@ start_date = st.sidebar.date_input(
          "(Hint: You can type the date in YYYY/MM/DD format instead of choosing it from the selector, which may be faster.)",
     disabled=is_guidance,  # In Guidance Mode, this is fixed to today
     on_change=_unmark_initial_spending_overridden,
-    key="retirement_start_date",
+    key=start_date_key,
 )
+
+if is_guidance:
+    start_date = today_date
+else:
+    start_date = _get_date_state(start_date_key, start_date_default)
+    st.session_state[sim_start_key] = start_date
+
 
 retirement_duration_months = st.sidebar.number_input(
     "Retirement Duration (months)",
