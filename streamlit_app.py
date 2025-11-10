@@ -525,9 +525,6 @@ st.session_state["settings"] = settings
 
 encoded_config = settings.to_base64()
 st.session_state["_encoded_settings"] = encoded_config
-current_config_query = st.query_params.get("config")
-if current_config_query != encoded_config:
-    st.query_params["config"] = encoded_config
 share_link_url = f"?config={encoded_config}"
 
 sim_signature = settings.simulation_signature()
