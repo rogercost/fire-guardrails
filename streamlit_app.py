@@ -155,8 +155,8 @@ analysis_start_date = st.sidebar.date_input(
 initial_value = st.sidebar.number_input(
     "Initial Portfolio Value",
     value=_get_float_state("initial_portfolio_value", 1_000_000.0),
-    min_value=100_000,
-    step=100_000,
+    min_value=100_000.0,
+    step=100_000.0,
     on_change=_unmark_initial_spending_overridden,
     key="initial_portfolio_value",
     help="Starting portfolio balance in dollars at retirement."
