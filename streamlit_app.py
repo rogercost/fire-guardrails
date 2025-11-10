@@ -158,16 +158,21 @@ else:
     st.session_state[sim_start_key] = start_date
 
 
-retirement_duration_months = st.sidebar.number_input(
-    "Retirement Duration (months)",
-    value=_get_int_state("retirement_duration_months", 360),
-    min_value=1,
-    max_value=1200,
-    step=12,
-    on_change=_unmark_initial_spending_overridden,
-    key="retirement_duration_months",
-    help="Length of retirement in months.\n\nIn Guidance Mode, this should be the remaining number of months, if retirement is already underway."
-)
+retirement_duration_default = _get_int_state("retirement_duration_months", 360)
+retirement_duration_kwargs = {
+    "label": "Retirement Duration (months)",
+    "min_value": 1,
+    "max_value": 1200,
+    "step": 12,
+    "on_change": _unmark_initial_spending_overridden,
+    "key": "retirement_duration_months",
+    "help": "Length of retirement in months.\n\nIn Guidance Mode, this should be the remaining number of months, if retirement is already underway.",
+}
+if "retirement_duration_months" not in st.session_state:
+    retirement_duration_kwargs["value"] = retirement_duration_default
+
+retirement_duration_months = st.sidebar.number_input(**retirement_duration_kwargs)
+retirement_duration_months = int(retirement_duration_months)
 
 analysis_start_date = st.sidebar.date_input(
     "Historical Analysis Start Date",
