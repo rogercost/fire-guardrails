@@ -173,7 +173,7 @@ def calculate_success_rate(df, withdrawal_rate, num_months, stock_pct=0.75,
     bond_returns = np.ones(len(bond_prices))
     bond_returns[1:] = bond_prices[1:] / bond_prices[:-1]
 
-    stock_pct = float(settings.stock_pct)
+    stock_pct = float(stock_pct)
     portfolio_returns = stock_pct * stock_returns + (1 - stock_pct) * bond_returns
     monthly_spending = initial_value * withdrawal_rate / 12
 
@@ -401,6 +401,7 @@ def get_guardrail_withdrawals(
     bond_returns = np.ones(len(all_bond_prices))
     bond_returns[1:] = all_bond_prices[1:] / all_bond_prices[:-1]
 
+    stock_pct = float(settings.stock_pct)
     portfolio_returns = stock_pct * stock_returns + (1 - stock_pct) * bond_returns
 
     # Initialize results storage

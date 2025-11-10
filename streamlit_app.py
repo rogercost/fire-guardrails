@@ -1,10 +1,7 @@
 import datetime
-import json
-
 import streamlit as st
 import pandas as pd
 import numpy as np
-from streamlit.components.v1 import html
 from typing import Optional
 
 import utils
@@ -16,10 +13,9 @@ st.set_page_config(layout="wide", page_title="Guardrail Withdrawal Simulator")
 
 # Apply configuration from hyperlink when available (only once per session)
 if "_settings_initialized" not in st.session_state:
-    query_params = st.experimental_get_query_params()
-    config_values = query_params.get("config") if query_params else None
-    if config_values:
-        config_value = config_values[0]
+    query_params = st.query_params
+    config_value = query_params.get("config") if query_params is not None else None
+    if config_value:
         try:
             loaded_settings = Settings.from_base64(config_value)
             loaded_settings.apply_to_session_state(st.session_state)
@@ -68,56 +64,32 @@ def _render_sidebar_label(text: str, color: Optional[str] = None) -> None:
     st.sidebar.markdown(f"<div style=\"{style}\">{text}</div>", unsafe_allow_html=True)
 
 
-def _render_share_link(encoded_config: str) -> None:
-    share_component = f"""
-    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-        <input id="share-config-input" value="" readonly
-            style="padding: 0.45rem 0.5rem; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 0.85rem;" />
-        <button id="share-config-button"
-            style="padding: 0.45rem 0.5rem; border-radius: 4px; border: none; background: #1f77b4; color: white; cursor: pointer; font-size: 0.85rem;">
-            Copy shareable link
-        </button>
-        <span id="share-config-status" style="font-size: 0.75rem; color: #1f77b4;"></span>
-    </div>
-    <script>
-        (function() {{
-            const encoded = {json.dumps(encoded_config)};
-            const input = document.getElementById('share-config-input');
-            const button = document.getElementById('share-config-button');
-            const status = document.getElementById('share-config-status');
+def _get_date_state(key: str, default: datetime.date) -> datetime.date:
+    value = st.session_state.get(key)
+    if value is None:
+        return default
+    if isinstance(value, datetime.date):
+        return value
+    try:
+        return pd.to_datetime(value).date()
+    except Exception:
+        return default
 
-            const buildLink = () => {{
-                const parentWin = window.parent || window;
-                const base = parentWin.location.origin + parentWin.location.pathname;
-                return `${{base}}?config=${{encoded}}`;
-            }};
 
-            const linkValue = buildLink();
-            if (input) {{
-                input.value = linkValue;
-                input.addEventListener('focus', () => input.select());
-            }}
+def _get_int_state(key: str, default: int) -> int:
+    value = st.session_state.get(key)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
-            if (button) {{
-                button.addEventListener('click', () => {{
-                    navigator.clipboard.writeText(linkValue).then(() => {{
-                        if (status) {{
-                            status.textContent = 'Link copied to clipboard';
-                            status.style.color = '#1f77b4';
-                            setTimeout(() => status.textContent = '', 2000);
-                        }}
-                    }}).catch(() => {{
-                        if (status) {{
-                            status.textContent = 'Unable to copy link automatically';
-                            status.style.color = '#d62728';
-                        }}
-                    }});
-                }});
-            }}
-        }})();
-    </script>
-    """
-    html(share_component, height=150)
+
+def _get_float_state(key: str, default: float) -> float:
+    value = st.session_state.get(key)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 def _mark_initial_spending_overridden() -> None:
     """Flag that the current spending widget has been manually overridden."""
@@ -136,9 +108,13 @@ if settings_error:
 
 # Date Inputs
 today_date = datetime.date.today()
+if is_guidance:
+    st.session_state["retirement_start_date"] = today_date
+start_date_default = datetime.date(1968, 4, 1)
+start_date_value = today_date if is_guidance else _get_date_state("retirement_start_date", start_date_default)
 start_date = st.sidebar.date_input(
     "Retirement Start Date",
-    value=today_date if is_guidance else datetime.date(1968, 4, 1),
+    value=start_date_value,
     min_value=datetime.date(1871, 1, 1),
     max_value=today_date,
     help="First retirement date used for withdrawals.\n\nCurrently, only the year and month are used, due to the monthly nature of the Shiller "
@@ -152,7 +128,7 @@ start_date = st.sidebar.date_input(
 
 retirement_duration_months = st.sidebar.number_input(
     "Retirement Duration (months)",
-    value=360,
+    value=_get_int_state("retirement_duration_months", 360),
     min_value=1,
     max_value=1200,
     step=12,
@@ -163,7 +139,7 @@ retirement_duration_months = st.sidebar.number_input(
 
 analysis_start_date = st.sidebar.date_input(
     "Historical Analysis Start Date",
-    value=datetime.date(1871, 1, 1),
+    value=_get_date_state("analysis_start_date", datetime.date(1871, 1, 1)),
     min_value=datetime.date(1871, 1, 1),
     max_value=datetime.date.today(),
     on_change=_unmark_initial_spending_overridden,
@@ -178,7 +154,7 @@ analysis_start_date = st.sidebar.date_input(
 # Numeric Inputs
 initial_value = st.sidebar.number_input(
     "Initial Portfolio Value",
-    value=1_000_000,
+    value=_get_float_state("initial_portfolio_value", 1_000_000.0),
     min_value=100_000,
     step=100_000,
     on_change=_unmark_initial_spending_overridden,
@@ -188,7 +164,7 @@ initial_value = st.sidebar.number_input(
 
 stock_pct = st.sidebar.slider(
     "Stock Percentage",
-    value=0.75,
+    value=_get_float_state("stock_pct", 0.75),
     min_value=0.0,
     max_value=1.0,
     step=0.01,
@@ -369,7 +345,7 @@ lower_guardrail_success = st.sidebar.slider(
 
 upper_adjustment_fraction = st.sidebar.slider(
     "Upper Adjustment Fraction",
-    value=1.0,
+    value=_get_float_state("upper_adjustment_fraction", 1.0),
     min_value=0.0,
     max_value=1.0,
     step=0.05,
@@ -383,7 +359,7 @@ upper_adjustment_fraction = st.sidebar.slider(
 
 lower_adjustment_fraction = st.sidebar.slider(
     "Lower Adjustment Fraction",
-    value=0.1,
+    value=_get_float_state("lower_adjustment_fraction", 0.1),
     min_value=0.0,
     max_value=1.0,
     step=0.05,
@@ -395,9 +371,10 @@ lower_adjustment_fraction = st.sidebar.slider(
          "is more conservative, and will cause you to make larger spending decreases when you hit the lower guardrail."
 )
 
+default_threshold = 0.0 if is_guidance else 0.05
 adjustment_threshold = st.sidebar.slider(
     "Adjustment Threshold (e.g., 0.05 for 5%)",
-    value=0.0 if is_guidance else 0.05,
+    value=_get_float_state("adjustment_threshold", default_threshold),
     min_value=0.0,
     max_value=0.2,
     step=0.01,
@@ -411,10 +388,16 @@ adjustment_threshold = st.sidebar.slider(
     disabled=is_guidance  # In Guidance Mode, single-run snapshot ignores threshold
 )
 
+frequency_options = ["Monthly", "Quarterly", "Biannually", "Annually"]
+current_frequency = st.session_state.get("adjustment_frequency", "Monthly")
+try:
+    frequency_index = frequency_options.index(str(current_frequency))
+except ValueError:
+    frequency_index = 0
 adjustment_frequency = st.sidebar.selectbox(
     "Adjustment Frequency",
-    options=["Monthly", "Quarterly", "Biannually", "Annually"],
-    index=0,
+    options=frequency_options,
+    index=frequency_index,
     key="adjustment_frequency",
     help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
          "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January).",
@@ -511,15 +494,17 @@ settings = Settings(
 
 st.session_state["settings"] = settings
 
+encoded_config = settings.to_base64()
+st.session_state["_encoded_settings"] = encoded_config
+current_config_query = st.query_params.get("config")
+if current_config_query != encoded_config:
+    st.query_params["config"] = encoded_config
+share_link_url = f"?config={encoded_config}"
+
 sim_signature = settings.simulation_signature()
 last_run_signature = st.session_state.get('last_run_signature')
 dirty = last_run_signature is not None and last_run_signature != sim_signature
 st.session_state['dirty'] = dirty
-
-st.sidebar.divider()
-st.sidebar.subheader("Share this setup")
-_render_share_link(settings.to_base64())
-st.sidebar.caption("Copy the link to load these settings on any device.")
 
 DIRTY_COLOR = "#8B0000"  # dark red
 
@@ -702,3 +687,7 @@ elif not is_guidance:
         st.markdown("Use this mode to simulate running a guardrail-based retirement withdrawal strategy during a historical period.\n\n"
                     "For more information, see the [documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
         st.info("Adjust parameters in the sidebar and click 'Run Simulation' to start.")
+
+st.divider()
+st.markdown(f"[Shareable link to this run]({share_link_url})")
+st.caption("Copy the link to load these settings on any device.")
