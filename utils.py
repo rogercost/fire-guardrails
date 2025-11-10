@@ -594,7 +594,7 @@ def compute_guardrail_guidance_snapshot(
     df,
     asof_date,
     settings: Settings,
-):
+) -> dict:
     """Compute a single-point guidance snapshot (no historical loop).
 
     Parameters

@@ -1,29 +1,20 @@
 import datetime
-import streamlit as st
-import pandas as pd
-import numpy as np
 from typing import Optional
 
-import utils
-import display
+import numpy as np
+import pandas as pd
+import streamlit as st
+
 import controls
+import display
+import utils
 from app_settings import CashflowSetting, Settings
 
 st.set_page_config(layout="wide", page_title="Guardrail Withdrawal Simulator")
 
 # Apply configuration from hyperlink when available (only once per session)
 if "_settings_initialized" not in st.session_state:
-    query_params = st.query_params
-    config_value = query_params.get("config") if query_params is not None else None
-    if config_value:
-        try:
-            loaded_settings = Settings.from_base64(config_value)
-            loaded_settings.apply_to_session_state(st.session_state)
-            st.session_state["settings"] = loaded_settings
-            st.session_state["_settings_loaded_from_query"] = True
-        except Exception as exc:
-            st.session_state["_settings_error"] = str(exc)
-    st.session_state["_settings_initialized"] = True
+    controls.hydrate_settings()
 
 # Mode toggle (top, persistent)
 mode = st.radio(
@@ -36,21 +27,7 @@ mode = st.radio(
 )
 is_guidance = (mode == "Guidance Mode")
 
-title_ph = st.empty()
-desc_ph = st.empty()
-
-if "show_advanced_modal" not in st.session_state:
-    st.session_state["show_advanced_modal"] = False
-if "spending_cap_option" not in st.session_state:
-    st.session_state["spending_cap_option"] = "Unlimited"
-if "spending_floor_option" not in st.session_state:
-    st.session_state["spending_floor_option"] = "Unlimited"
-if "cashflows" not in st.session_state:
-    st.session_state["cashflows"] = []
-if "_initial_spending_overridden" not in st.session_state:
-    st.session_state["_initial_spending_overridden"] = False
-if "_initial_spending_auto_value" not in st.session_state:
-    st.session_state["_initial_spending_auto_value"] = None
+controls.initialize_display()
 
 def _render_sidebar_label(text: str, color: Optional[str] = None) -> None:
     style = (
@@ -62,34 +39,6 @@ def _render_sidebar_label(text: str, color: Optional[str] = None) -> None:
     if color:
         style += f" color: {color};"
     st.sidebar.markdown(f"<div style=\"{style}\">{text}</div>", unsafe_allow_html=True)
-
-
-def _get_date_state(key: str, default: datetime.date) -> datetime.date:
-    value = st.session_state.get(key)
-    if value is None:
-        return default
-    if isinstance(value, datetime.date):
-        return value
-    try:
-        return pd.to_datetime(value).date()
-    except Exception:
-        return default
-
-
-def _get_int_state(key: str, default: int) -> int:
-    value = st.session_state.get(key)
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _get_float_state(key: str, default: float) -> float:
-    value = st.session_state.get(key)
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 def _mark_initial_spending_overridden() -> None:
     """Flag that the current spending widget has been manually overridden."""
@@ -111,28 +60,7 @@ today_date = datetime.date.today()
 start_date_default = datetime.date(1968, 4, 1)
 start_date_key = "retirement_start_date"
 sim_start_key = "_simulation_retirement_start_date"
-previous_mode_key = "_previous_mode"
-
-if sim_start_key not in st.session_state:
-    st.session_state[sim_start_key] = _get_date_state(start_date_key, start_date_default)
-
-previous_mode = st.session_state.get(previous_mode_key)
-if previous_mode != mode:
-    if is_guidance:
-        st.session_state[sim_start_key] = _get_date_state(start_date_key, start_date_default)
-        st.session_state[start_date_key] = today_date
-    else:
-        restored_start = st.session_state.get(sim_start_key, start_date_default)
-        if not isinstance(restored_start, datetime.date):
-            restored_start = _get_date_state(start_date_key, start_date_default)
-        st.session_state[start_date_key] = restored_start
-    st.session_state[previous_mode_key] = mode
-
-if start_date_key not in st.session_state:
-    default_start = today_date if is_guidance else st.session_state.get(sim_start_key, start_date_default)
-    if not isinstance(default_start, datetime.date):
-        default_start = start_date_default
-    st.session_state[start_date_key] = default_start
+controls.init_start_date_field(today_date, sim_start_key, start_date_key, start_date_default, mode, is_guidance)
 
 start_date = st.sidebar.date_input(
     "Retirement Start Date",
@@ -150,13 +78,12 @@ start_date = st.sidebar.date_input(
 if is_guidance:
     start_date = today_date
 else:
-    start_date = _get_date_state(start_date_key, start_date_default)
+    start_date = controls.get_date_state(start_date_key, start_date_default)
     st.session_state[sim_start_key] = start_date
-
 
 retirement_duration_months = st.sidebar.number_input(
     "Retirement Duration (months)",
-    value=_get_int_state("retirement_duration_months", 360),
+    value=controls.get_int_state("retirement_duration_months", 360),
     min_value=1,
     max_value=1200,
     step=12,
@@ -167,7 +94,7 @@ retirement_duration_months = st.sidebar.number_input(
 
 analysis_start_date = st.sidebar.date_input(
     "Historical Analysis Start Date",
-    value=_get_date_state("analysis_start_date", datetime.date(1871, 1, 1)),
+    value=controls.get_date_state("analysis_start_date", datetime.date(1871, 1, 1)),
     min_value=datetime.date(1871, 1, 1),
     max_value=datetime.date.today(),
     on_change=_unmark_initial_spending_overridden,
@@ -182,7 +109,7 @@ analysis_start_date = st.sidebar.date_input(
 # Numeric Inputs
 initial_value = st.sidebar.number_input(
     "Initial Portfolio Value",
-    value=_get_float_state("initial_portfolio_value", 1_000_000.0),
+    value=controls.get_float_state("initial_portfolio_value", 1_000_000.0),
     min_value=100_000.0,
     step=100_000.0,
     on_change=_unmark_initial_spending_overridden,
@@ -192,7 +119,7 @@ initial_value = st.sidebar.number_input(
 
 stock_pct = st.sidebar.slider(
     "Stock Percentage",
-    value=_get_float_state("stock_pct", 0.75),
+    value=controls.get_float_state("stock_pct", 0.75),
     min_value=0.0,
     max_value=1.0,
     step=0.01,
@@ -373,7 +300,7 @@ lower_guardrail_success = st.sidebar.slider(
 
 upper_adjustment_fraction = st.sidebar.slider(
     "Upper Adjustment Fraction",
-    value=_get_float_state("upper_adjustment_fraction", 1.0),
+    value=controls.get_float_state("upper_adjustment_fraction", 1.0),
     min_value=0.0,
     max_value=1.0,
     step=0.05,
@@ -387,7 +314,7 @@ upper_adjustment_fraction = st.sidebar.slider(
 
 lower_adjustment_fraction = st.sidebar.slider(
     "Lower Adjustment Fraction",
-    value=_get_float_state("lower_adjustment_fraction", 0.1),
+    value=controls.get_float_state("lower_adjustment_fraction", 0.1),
     min_value=0.0,
     max_value=1.0,
     step=0.05,
@@ -402,7 +329,7 @@ lower_adjustment_fraction = st.sidebar.slider(
 default_threshold = 0.0 if is_guidance else 0.05
 adjustment_threshold = st.sidebar.slider(
     "Adjustment Threshold (e.g., 0.05 for 5%)",
-    value=_get_float_state("adjustment_threshold", default_threshold),
+    value=controls.get_float_state("adjustment_threshold", default_threshold),
     min_value=0.0,
     max_value=0.2,
     step=0.01,
@@ -457,41 +384,7 @@ with st.sidebar.expander("Advanced Controls"):
         })
         st.rerun()
 
-    for idx, flow in enumerate(st.session_state["cashflows"]):
-        controls.ensure_cashflow_widget_state(idx, flow)
-
-        name_col, remove_col = st.columns([1, 0.15])
-        label_key = f"cf_label_{idx}"
-        name_col.text_input(
-            "Cashflow Name",
-            key=label_key,
-            label_visibility="collapsed",
-            placeholder="Cashflow name",
-        )
-        if remove_col.button("✕", key=f"cf_remove_{idx}"):
-            st.session_state["cashflows"].pop(idx)
-            controls.clear_cashflow_widget_state(idx)
-            st.rerun()
-
-        col_start, col_end, col_amount = st.columns(3)
-        col_start.number_input(
-            "Start Month",
-            min_value=0,
-            step=1,
-            key=f"cf_start_{idx}",
-        )
-        col_end.number_input(
-            "End Month",
-            min_value=0,
-            step=1,
-            key=f"cf_end_{idx}",
-        )
-        col_amount.number_input(
-            "Amount ($/mo)",
-            step=50.0,
-            format="%0.0f",
-            key=f"cf_amount_{idx}",
-        )
+    controls.draw_cashflow_widget_rows()
 
 
 # Build Settings object representing the full control state
@@ -532,43 +425,12 @@ last_run_signature = st.session_state.get('last_run_signature')
 dirty = last_run_signature is not None and last_run_signature != sim_signature
 st.session_state['dirty'] = dirty
 
-DIRTY_COLOR = "#8B0000"  # dark red
-
-def render_dirty_banner():
-    st.markdown(
-        f"""
-        <div style="
-            padding: 0.75rem 1rem;
-            margin: 0 0 0.75rem 0;
-            border: 1px solid {DIRTY_COLOR};
-            background: rgba(139,0,0,0.08);
-            color: {DIRTY_COLOR};
-            border-radius: 6px;
-            font-weight: 600;">
-            Inputs changed, please rerun
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
 # When inputs change, visually dim and surround the main area with a red border
 if dirty and not is_guidance:
-    st.markdown(
-        f"""
-        <style>
-        [data-testid="stAppViewContainer"] > .main {{
-            border: 3px solid {DIRTY_COLOR};
-            border-radius: 8px;
-            padding: 6px;
-            filter: grayscale(30%) brightness(0.95);
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+    controls.draw_dirty_border()
 
-
+# ------ Main Program Logic -------
+#
 if is_guidance:
     # Guidance Mode: run a single-iteration snapshot and display text output
 
@@ -590,63 +452,7 @@ if is_guidance:
             settings=settings,
         )
 
-        # TODO for https://github.com/rogercost/fire-guardrails/issues/13
-        # Create a nice tabular or graphic display, move logic to display module
-
-        def fmt_money(x):
-            # Escape the dollar sign so Streamlit Markdown doesn't interpret $...$ as LaTeX math
-            return f"\\${x:,.0f}" if (x is not None and (isinstance(x, (int, float)) and not np.isinf(x))) else "N/A"
-
-        def fmt_pct(p):
-            return f"{p*100:+.0f}%" if p is not None else "N/A"
-
-        start_wr = st.session_state.get("iwr_value", snap.get("target_withdrawal_rate"))
-        start_month = snap.get("target_monthly_spending")
-        start_year = (start_month * 12.0) if start_month is not None else None
-        start_net_withdrawal = snap.get("target_monthly_withdrawal")
-
-        upper_val = snap.get("upper_guardrail_value")
-        lower_val = snap.get("lower_guardrail_value")
-
-        up_adj_pct = snap.get("upper_adjustment_pct")
-        up_adj_month = snap.get("upper_adjusted_monthly")
-        up_adj_year = (up_adj_month * 12.0) if up_adj_month is not None else None
-
-        low_adj_pct = snap.get("lower_adjustment_pct")
-        low_adj_month = snap.get("lower_adjusted_monthly")
-        low_adj_year = (low_adj_month * 12.0) if low_adj_month is not None else None
-
-        cashflow_month0 = snap.get("current_cashflow")
-
-        def fmt_month(ts):
-            if ts is None or pd.isna(ts):
-                return "N/A"
-            timestamp = pd.to_datetime(ts)
-            return timestamp.strftime("%B %Y")
-
-        st.subheader("Guidance Mode")
-        st.markdown("Use this mode to generate forward-looking guidance for a client who is retired today and in drawdown.\n\n"
-                    "For more information, see the [official documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
-
-        if start_wr is not None:
-            st.markdown(
-                f"* **Target Withdrawal Rate:** {start_wr*100:.2f}% "
-                f"({fmt_money(start_month)}/month or {fmt_money(start_year)}/year total spending based on the Initial Portfolio Value) "
-                f"— portfolio withdrawal after cashflows: {fmt_money(start_net_withdrawal)}/month"
-            )
-        else:
-            st.markdown("**Starting Withdrawal Rate:** N/A")
-
-        st.markdown(f"* **Month 1 Cashflows:** {fmt_money(cashflow_month0)}/month")
-
-        st.markdown(
-            f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Current Monthly Spending\n  * If client's portfolio value exceeds this, adjust "
-            f"spending by {fmt_pct(up_adj_pct)} to {fmt_money(up_adj_month)}/month or {fmt_money(up_adj_year)}/year"
-        )
-        st.markdown(
-            f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Current Monthly Spending\n  * If client's portfolio value falls below this, adjust "
-            f"spending by {fmt_pct(low_adj_pct)} to {fmt_money(low_adj_month)}/month or {fmt_money(low_adj_year)}/year"
-        )
+        display.render_guidance_results(snap=snap)
 
     except Exception as e:
         st.error(f"Unable to compute guidance snapshot: {e}")
@@ -705,7 +511,7 @@ elif not is_guidance:
         results_df = st.session_state['results_df']
 
         if st.session_state.get('dirty'):
-            render_dirty_banner()
+            controls.render_dirty_banner()
 
         display.render_simulation_results(results_df)
     else:
