@@ -15,15 +15,19 @@ st.set_page_config(layout="wide", page_title="Guardrail Withdrawal Simulator")
 if "_settings_initialized" not in st.session_state:
     query_params = st.query_params
     config_value = query_params.get("config") if query_params is not None else None
+    needs_rerun = False
     if config_value:
         try:
             loaded_settings = Settings.from_base64(config_value)
             loaded_settings.apply_to_session_state(st.session_state)
             st.session_state["settings"] = loaded_settings
             st.session_state["_settings_loaded_from_query"] = True
+            needs_rerun = True
         except Exception as exc:
             st.session_state["_settings_error"] = str(exc)
     st.session_state["_settings_initialized"] = True
+    if needs_rerun:
+        st.rerun()
 
 # Mode toggle (top, persistent)
 mode = st.radio(
@@ -509,6 +513,7 @@ settings = Settings(
     stock_pct=float(stock_pct),
     target_success_rate=float(target_success_rate),
     initial_monthly_spending=float(initial_monthly_spending),
+    initial_spending_overridden=bool(st.session_state.get("_initial_spending_overridden", False)),
     upper_guardrail_success=float(upper_guardrail_success),
     lower_guardrail_success=float(lower_guardrail_success),
     upper_adjustment_fraction=float(upper_adjustment_fraction),

@@ -73,6 +73,7 @@ class Settings:
     stock_pct: float
     target_success_rate: float
     initial_monthly_spending: float
+    initial_spending_overridden: bool
     upper_guardrail_success: float
     lower_guardrail_success: float
     upper_adjustment_fraction: float
@@ -90,6 +91,7 @@ class Settings:
         self.stock_pct = float(self.stock_pct)
         self.target_success_rate = float(self.target_success_rate)
         self.initial_monthly_spending = float(self.initial_monthly_spending)
+        self.initial_spending_overridden = bool(self.initial_spending_overridden)
         self.upper_guardrail_success = float(self.upper_guardrail_success)
         self.lower_guardrail_success = float(self.lower_guardrail_success)
         self.upper_adjustment_fraction = float(self.upper_adjustment_fraction)
@@ -138,6 +140,7 @@ class Settings:
             "spending_floor_multiplier": self.spending_floor_multiplier,
             "cashflows": tuple(flow.signature() for flow in self.cashflows),
             "initial_monthly_spending": float(self.initial_monthly_spending),
+            "initial_spending_overridden": bool(self.initial_spending_overridden),
         }
 
     def retirement_end_date(self) -> Optional[dt.date]:
@@ -160,6 +163,7 @@ class Settings:
             "stock_pct": float(self.stock_pct),
             "target_success_rate": float(self.target_success_rate),
             "initial_monthly_spending": float(self.initial_monthly_spending),
+            "initial_spending_overridden": bool(self.initial_spending_overridden),
             "upper_guardrail_success": float(self.upper_guardrail_success),
             "lower_guardrail_success": float(self.lower_guardrail_success),
             "upper_adjustment_fraction": float(self.upper_adjustment_fraction),
@@ -197,6 +201,7 @@ class Settings:
             stock_pct=data.get("stock_pct", 0.75),
             target_success_rate=data.get("target_success_rate", 0.9),
             initial_monthly_spending=data.get("initial_monthly_spending", 0.0),
+            initial_spending_overridden=data.get("initial_spending_overridden", False),
             upper_guardrail_success=data.get("upper_guardrail_success", 1.0),
             lower_guardrail_success=data.get("lower_guardrail_success", 0.75),
             upper_adjustment_fraction=data.get("upper_adjustment_fraction", 1.0),
@@ -226,6 +231,7 @@ class Settings:
         session_state["stock_pct"] = self.stock_pct
         session_state["target_success_rate"] = self.target_success_rate
         session_state["initial_monthly_spending"] = self.initial_monthly_spending
+        session_state["_initial_spending_overridden"] = bool(self.initial_spending_overridden)
         session_state["upper_guardrail_success"] = self.upper_guardrail_success
         session_state["lower_guardrail_success"] = self.lower_guardrail_success
         session_state["upper_adjustment_fraction"] = self.upper_adjustment_fraction
