@@ -30,6 +30,8 @@ is_guidance = (mode == "Guidance Mode")
 controls.initialize_display()
 
 def _render_sidebar_label(text: str, color: Optional[str] = None) -> None:
+    """Render styled sidebar helper text with optional highlighting."""
+
     style = (
         "margin: 0 0 0.25rem 0;"
         " font-size: var(--font-size-sm, 0.875rem);"

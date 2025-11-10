@@ -461,6 +461,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
 
 
 def render_guidance_results(snap: dict):
+    """Summarize the guardrail guidance snapshot as advisor-friendly bullet points."""
 
     # TODO for https://github.com/rogercost/fire-guardrails/issues/13
     # Create a nice tabular or graphic display, move logic to display module

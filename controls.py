@@ -9,6 +9,8 @@ DIRTY_COLOR = "#8B0000"  # dark red
 
 # Helpers for cashflow management
 def sanitize_cashflows(raw_cashflows):
+    """Convert raw cashflow inputs into validated dictionaries with numeric values."""
+
     sanitized = []
     for flow in raw_cashflows or []:
         try:
@@ -34,11 +36,13 @@ def sanitize_cashflows(raw_cashflows):
 
 
 def cashflows_to_tuple(cashflows):
+    """Create a hashable snapshot of each cashflow's timing and amount."""
+
     return tuple((cf["start_month"], cf["end_month"], cf["amount"]) for cf in cashflows)
 
 
 def clear_cashflow_widget_state(start_idx: int = 0) -> None:
-    """Remove cached widget values for cashflows starting from ``start_idx``."""
+    """Remove cached widget values for cashflow inputs from the specified starting index onward."""
 
     prefixes = (
         "cf_start_",
@@ -62,6 +66,8 @@ def clear_cashflow_widget_state(start_idx: int = 0) -> None:
 
 # Ensure widget defaults for existing cashflows remain synchronized prior to rendering inputs
 def ensure_cashflow_widget_state(idx: int, flow: dict) -> None:
+    """Keep a cashflow row's widget state aligned with sanitized default values."""
+
     start_key = f"cf_start_{idx}"
     end_key = f"cf_end_{idx}"
     amount_key = f"cf_amount_{idx}"
@@ -88,6 +94,8 @@ def ensure_cashflow_widget_state(idx: int, flow: dict) -> None:
 
 
 def sync_cashflows_from_widgets() -> None:
+    """Write the current widget state back into the tracked cashflow configurations."""
+
     flows = st.session_state.get("cashflows")
     if not flows:
         return
@@ -133,6 +141,8 @@ def sync_cashflows_from_widgets() -> None:
 
 
 def get_date_state(key: str, default: datetime.date) -> datetime.date:
+    """Return a stored date value, falling back to the provided baseline when parsing fails."""
+
     value = st.session_state.get(key)
     if value is None:
         return default
@@ -145,6 +155,8 @@ def get_date_state(key: str, default: datetime.date) -> datetime.date:
 
 
 def get_int_state(key: str, default: int) -> int:
+    """Return an integer from session state, using the fallback when conversion is unsafe."""
+
     value = st.session_state.get(key)
     try:
         return int(value)
@@ -153,6 +165,8 @@ def get_int_state(key: str, default: int) -> int:
 
 
 def get_float_state(key: str, default: float) -> float:
+    """Return a floating-point number from session state, with graceful fallback on errors."""
+
     value = st.session_state.get(key)
     try:
         return float(value)
@@ -161,6 +175,8 @@ def get_float_state(key: str, default: float) -> float:
 
 
 def init_start_date_field(today_date, sim_start_key, start_date_key, start_date_default, mode, is_guidance):
+    """Manage the retirement start date widget when switching between simulation and guidance modes."""
+
     previous_mode_key = "_previous_mode"
 
     if sim_start_key not in st.session_state:
@@ -186,6 +202,8 @@ def init_start_date_field(today_date, sim_start_key, start_date_key, start_date_
 
 
 def initialize_display():
+    """Populate session state with default values required for the control widgets."""
+
     if "show_advanced_modal" not in st.session_state:
         st.session_state["show_advanced_modal"] = False
     if "spending_cap_option" not in st.session_state:
@@ -201,6 +219,8 @@ def initialize_display():
 
 
 def draw_cashflow_widget_rows():
+    """Render editable cashflow rows and keep their widgets synchronized."""
+
     for idx, flow in enumerate(st.session_state["cashflows"]):
         ensure_cashflow_widget_state(idx, flow)
 
@@ -238,6 +258,8 @@ def draw_cashflow_widget_rows():
         )
 
 def render_dirty_banner():
+    """Display a warning banner indicating that the inputs changed and a rerun is needed."""
+
     st.markdown(
         f"""
         <div style="
@@ -255,6 +277,8 @@ def render_dirty_banner():
     )
 
 def draw_dirty_border():
+    """Add a temporary border effect around the app to reinforce the rerun prompt."""
+
     st.markdown(
         f"""
         <style>
@@ -270,6 +294,8 @@ def draw_dirty_border():
     )
 
 def hydrate_settings():
+    """Load shared configuration details from the URL and apply them to the session."""
+
     query_params = st.query_params
     config_value = query_params.get("config") if query_params is not None else None
     if config_value:
