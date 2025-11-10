@@ -15,10 +15,14 @@ def sanitize_cashflows(raw_cashflows):
         if end < start:
             continue
 
+        label_raw = flow.get("label") if isinstance(flow, dict) else None
+        label = str(label_raw).strip() if label_raw is not None else None
+
         sanitized.append({
             "start_month": start,
             "end_month": end,
             "amount": amount,
+            "label": label,
         })
     return sanitized
 
