@@ -1,15 +1,33 @@
 import datetime
+import json
 
 import streamlit as st
 import pandas as pd
 import numpy as np
+from streamlit.components.v1 import html
 from typing import Optional
 
 import utils
 import display
 import controls
+from app_settings import CashflowSetting, Settings
 
 st.set_page_config(layout="wide", page_title="Guardrail Withdrawal Simulator")
+
+# Apply configuration from hyperlink when available (only once per session)
+if "_settings_initialized" not in st.session_state:
+    query_params = st.experimental_get_query_params()
+    config_values = query_params.get("config") if query_params else None
+    if config_values:
+        config_value = config_values[0]
+        try:
+            loaded_settings = Settings.from_base64(config_value)
+            loaded_settings.apply_to_session_state(st.session_state)
+            st.session_state["settings"] = loaded_settings
+            st.session_state["_settings_loaded_from_query"] = True
+        except Exception as exc:
+            st.session_state["_settings_error"] = str(exc)
+    st.session_state["_settings_initialized"] = True
 
 # Mode toggle (top, persistent)
 mode = st.radio(
@@ -49,6 +67,58 @@ def _render_sidebar_label(text: str, color: Optional[str] = None) -> None:
         style += f" color: {color};"
     st.sidebar.markdown(f"<div style=\"{style}\">{text}</div>", unsafe_allow_html=True)
 
+
+def _render_share_link(encoded_config: str) -> None:
+    share_component = f"""
+    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+        <input id="share-config-input" value="" readonly
+            style="padding: 0.45rem 0.5rem; border: 1px solid #d0d0d0; border-radius: 4px; font-size: 0.85rem;" />
+        <button id="share-config-button"
+            style="padding: 0.45rem 0.5rem; border-radius: 4px; border: none; background: #1f77b4; color: white; cursor: pointer; font-size: 0.85rem;">
+            Copy shareable link
+        </button>
+        <span id="share-config-status" style="font-size: 0.75rem; color: #1f77b4;"></span>
+    </div>
+    <script>
+        (function() {{
+            const encoded = {json.dumps(encoded_config)};
+            const input = document.getElementById('share-config-input');
+            const button = document.getElementById('share-config-button');
+            const status = document.getElementById('share-config-status');
+
+            const buildLink = () => {{
+                const parentWin = window.parent || window;
+                const base = parentWin.location.origin + parentWin.location.pathname;
+                return `${{base}}?config=${{encoded}}`;
+            }};
+
+            const linkValue = buildLink();
+            if (input) {{
+                input.value = linkValue;
+                input.addEventListener('focus', () => input.select());
+            }}
+
+            if (button) {{
+                button.addEventListener('click', () => {{
+                    navigator.clipboard.writeText(linkValue).then(() => {{
+                        if (status) {{
+                            status.textContent = 'Link copied to clipboard';
+                            status.style.color = '#1f77b4';
+                            setTimeout(() => status.textContent = '', 2000);
+                        }}
+                    }}).catch(() => {{
+                        if (status) {{
+                            status.textContent = 'Unable to copy link automatically';
+                            status.style.color = '#d62728';
+                        }}
+                    }});
+                }});
+            }}
+        }})();
+    </script>
+    """
+    html(share_component, height=150)
+
 def _mark_initial_spending_overridden() -> None:
     """Flag that the current spending widget has been manually overridden."""
     st.session_state["_initial_spending_overridden"] = True
@@ -59,6 +129,10 @@ def _unmark_initial_spending_overridden() -> None:
 
 # Sidebar for inputs
 st.sidebar.header("Simulation Parameters")
+
+settings_error = st.session_state.get("_settings_error")
+if settings_error:
+    st.sidebar.error(f"Unable to load shared configuration: {settings_error}")
 
 # Date Inputs
 today_date = datetime.date.today()
@@ -73,6 +147,7 @@ start_date = st.sidebar.date_input(
          "(Hint: You can type the date in YYYY/MM/DD format instead of choosing it from the selector, which may be faster.)",
     disabled=is_guidance,  # In Guidance Mode, this is fixed to today
     on_change=_unmark_initial_spending_overridden,
+    key="retirement_start_date",
 )
 
 retirement_duration_months = st.sidebar.number_input(
@@ -82,6 +157,7 @@ retirement_duration_months = st.sidebar.number_input(
     max_value=1200,
     step=12,
     on_change=_unmark_initial_spending_overridden,
+    key="retirement_duration_months",
     help="Length of retirement in months.\n\nIn Guidance Mode, this should be the remaining number of months, if retirement is already underway."
 )
 
@@ -95,7 +171,8 @@ analysis_start_date = st.sidebar.date_input(
          "are used, due to the monthly nature of the Shiller dataset. The day of the month is ignored.\n\nNote that when running historical "
          "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
          "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!\n\n"
-         "(Hint: You can type the date in YYYY/MM/DD format instead of choosing it from the selector, which may be faster.)"
+         "(Hint: You can type the date in YYYY/MM/DD format instead of choosing it from the selector, which may be faster.)",
+    key="analysis_start_date",
 )
 
 # Numeric Inputs
@@ -105,6 +182,7 @@ initial_value = st.sidebar.number_input(
     min_value=100_000,
     step=100_000,
     on_change=_unmark_initial_spending_overridden,
+    key="initial_portfolio_value",
     help="Starting portfolio balance in dollars at retirement."
 )
 
@@ -115,6 +193,7 @@ stock_pct = st.sidebar.slider(
     max_value=1.0,
     step=0.01,
     on_change=_unmark_initial_spending_overridden,
+    key="stock_pct",
     help="Fraction of the portfolio allocated to US stocks; remainder to 10Y treasuries."
 )
 
@@ -123,10 +202,7 @@ floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 24, -5)]
 
 controls.sync_cashflows_from_widgets()
 
-cashflows = controls.sanitize_cashflows(st.session_state.get("cashflows"))
-
-# Compute Retirement End Date for Simulation Mode from duration
-computed_end_date = (pd.to_datetime(start_date) + pd.DateOffset(months=int(retirement_duration_months) - 1)).date() if not is_guidance else None
+sanitized_cashflows = controls.sanitize_cashflows(st.session_state.get("cashflows"))
 
 # Compute Initial Withdrawal Rate (IWR) to show in the Target Success Rate label.
 # We recompute only when relevant inputs change to avoid unnecessary calls.
@@ -138,13 +214,13 @@ iwr_params = {
     'stock_pct': float(stock_pct),
     # Use current target_success_rate if available, otherwise default of 0.90
     'desired_success_rate': float(st.session_state.get('target_success_rate', 0.90)),
-    'cashflows': controls.cashflows_to_tuple(cashflows),
+    'cashflows': controls.cashflows_to_tuple(sanitized_cashflows),
 }
 iwr_label_suffix = ""
 
 try:
     if 'iwr_params' not in st.session_state or st.session_state['iwr_params'] != iwr_params:
-        display.update_iwr_dynamic_label(iwr_params=iwr_params, is_guidance=is_guidance, cashflows=cashflows)
+        display.update_iwr_dynamic_label(iwr_params=iwr_params, is_guidance=is_guidance, cashflows=sanitized_cashflows)
     iwr = st.session_state.get('iwr_value')
     if iwr is not None:
         iwr_label_suffix = f" (Initial WR: {iwr*100:.2f}%)"
@@ -235,11 +311,11 @@ try:
         'lower_sr': float(st.session_state.get("lower_guardrail_success", 0.75)),
         'iwr': float(st.session_state.get('iwr_value')) if st.session_state.get('iwr_value') is not None else None,
         'initial_spending': float(st.session_state.get("initial_monthly_spending", 0.0)),
-        'cashflows': controls.cashflows_to_tuple(cashflows),
+        'cashflows': controls.cashflows_to_tuple(sanitized_cashflows),
     }
 
     if ('guardrail_params' not in st.session_state) or (st.session_state['guardrail_params'] != gr_params):
-        display.update_guardrail_dynamic_labels(gr_params=gr_params, is_guidance=is_guidance, cashflows=cashflows)
+        display.update_guardrail_dynamic_labels(gr_params=gr_params, is_guidance=is_guidance, cashflows=sanitized_cashflows)
 
     upper_label_suffix = st.session_state.get('upper_label_suffix', " (Initial PV: N/A)")
     lower_label_suffix = st.session_state.get('lower_label_suffix', " (Initial PV: N/A)")
@@ -297,6 +373,7 @@ upper_adjustment_fraction = st.sidebar.slider(
     min_value=0.0,
     max_value=1.0,
     step=0.05,
+    key="upper_adjustment_fraction",
     help="How much to increase spending when we hit the upper guardrail.\n\nExpressed as a % of the distance between "
          "the Upper Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the upper guardrail "
          "represents 100% success and the target is 90%, setting this value to 50% means we go half the distance back "
@@ -310,6 +387,7 @@ lower_adjustment_fraction = st.sidebar.slider(
     min_value=0.0,
     max_value=1.0,
     step=0.05,
+    key="lower_adjustment_fraction",
     help="How much to decrease spending when we hit the lower guardrail.\n\nExpressed as a % of the distance between "
          "the Lower Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the lower guardrail "
          "represents 70% success and the target is 90%, setting this value to 50% means we go half the distance back "
@@ -323,6 +401,7 @@ adjustment_threshold = st.sidebar.slider(
     min_value=0.0,
     max_value=0.2,
     step=0.01,
+    key="adjustment_threshold",
     help="The minimum percent difference between our new spending and our prior spending, before we make a change.\n\n"
          "Even if we hit a guardrail, we may elect to set this to 5% to avoid making lots of small adjustments. Set it "
          "to 0% to disable it and allow all guardrail hits to trigger spending adjustments.\n\nSetting this higher is "
@@ -336,62 +415,11 @@ adjustment_frequency = st.sidebar.selectbox(
     "Adjustment Frequency",
     options=["Monthly", "Quarterly", "Biannually", "Annually"],
     index=0,
+    key="adjustment_frequency",
     help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
          "and any resulting spending changes to the beginning of those periods (Jan/Apr/Jul/Oct, Jan/Jul, or January).",
     disabled=is_guidance  # In Guidance Mode, no decision gating, it's up to the adviser and client
 )
-
-def _relative_option_to_multiplier(option: str):
-    if option == "Unlimited":
-        return None
-    try:
-        return float(option.strip("%")) / 100.0
-    except (TypeError, ValueError):
-        return None
-
-spending_cap_multiplier = _relative_option_to_multiplier(st.session_state.get("spending_cap_option"))
-spending_floor_multiplier = _relative_option_to_multiplier(st.session_state.get("spending_floor_option"))
-
-# Build current simulation parameters dict for change detection
-sim_params = {
-    'start_date': pd.to_datetime(start_date),
-    'duration_months': int(retirement_duration_months),
-    'analysis_start_date': pd.to_datetime(analysis_start_date),
-    'initial_value': float(initial_value),
-    'stock_pct': float(stock_pct),
-    'target_success_rate': float(target_success_rate),
-    'upper_guardrail_success': float(upper_guardrail_success),
-    'lower_guardrail_success': float(lower_guardrail_success),
-    'upper_adjustment_fraction': float(upper_adjustment_fraction),
-    'lower_adjustment_fraction': float(lower_adjustment_fraction),
-    'adjustment_threshold': float(adjustment_threshold),
-    'adjustment_frequency': adjustment_frequency,
-    'spending_cap_multiplier': spending_cap_multiplier,
-    'spending_floor_multiplier': spending_floor_multiplier,
-    'cashflows': controls.cashflows_to_tuple(cashflows),
-}
-last_run_params = st.session_state.get('last_run_params')
-dirty = last_run_params is not None and last_run_params != sim_params
-st.session_state['dirty'] = dirty
-
-DIRTY_COLOR = "#8B0000"  # dark red
-
-def render_dirty_banner():
-    st.markdown(
-        f"""
-        <div style="
-            padding: 0.75rem 1rem;
-            margin: 0 0 0.75rem 0;
-            border: 1px solid {DIRTY_COLOR};
-            background: rgba(139,0,0,0.08);
-            color: {DIRTY_COLOR};
-            border-radius: 6px;
-            font-weight: 600;">
-            Inputs changed, please rerun
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
 
 with st.sidebar.expander("Advanced Controls"):
     st.selectbox(
@@ -455,6 +483,64 @@ with st.sidebar.expander("Advanced Controls"):
         )
 
 
+# Build Settings object representing the full control state
+cashflow_settings = [
+    cf for cf in (CashflowSetting.from_dict(flow) for flow in sanitized_cashflows)
+    if cf is not None
+]
+
+settings = Settings(
+    mode=mode,
+    start_date=start_date,
+    retirement_duration_months=int(retirement_duration_months),
+    analysis_start_date=analysis_start_date,
+    initial_value=float(initial_value),
+    stock_pct=float(stock_pct),
+    target_success_rate=float(target_success_rate),
+    initial_monthly_spending=float(initial_monthly_spending),
+    upper_guardrail_success=float(upper_guardrail_success),
+    lower_guardrail_success=float(lower_guardrail_success),
+    upper_adjustment_fraction=float(upper_adjustment_fraction),
+    lower_adjustment_fraction=float(lower_adjustment_fraction),
+    adjustment_threshold=float(adjustment_threshold),
+    adjustment_frequency=adjustment_frequency,
+    spending_cap_option=st.session_state.get("spending_cap_option", "Unlimited"),
+    spending_floor_option=st.session_state.get("spending_floor_option", "Unlimited"),
+    cashflows=cashflow_settings,
+)
+
+st.session_state["settings"] = settings
+
+sim_signature = settings.simulation_signature()
+last_run_signature = st.session_state.get('last_run_signature')
+dirty = last_run_signature is not None and last_run_signature != sim_signature
+st.session_state['dirty'] = dirty
+
+st.sidebar.divider()
+st.sidebar.subheader("Share this setup")
+_render_share_link(settings.to_base64())
+st.sidebar.caption("Copy the link to load these settings on any device.")
+
+DIRTY_COLOR = "#8B0000"  # dark red
+
+def render_dirty_banner():
+    st.markdown(
+        f"""
+        <div style="
+            padding: 0.75rem 1rem;
+            margin: 0 0 0.75rem 0;
+            border: 1px solid {DIRTY_COLOR};
+            background: rgba(139,0,0,0.08);
+            color: {DIRTY_COLOR};
+            border-radius: 6px;
+            font-weight: 600;">
+            Inputs changed, please rerun
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
 # When inputs change, visually dim and surround the main area with a red border
 if dirty and not is_guidance:
     st.markdown(
@@ -490,17 +576,7 @@ if is_guidance:
         snap = utils.compute_guardrail_guidance_snapshot(
             df=shiller_df,
             asof_date=asof_date,
-            duration_months=int(retirement_duration_months),
-            analysis_start_date=analysis_start_date,
-            current_portfolio_value=initial_value,
-            initial_monthly_spending=initial_monthly_spending,
-            stock_pct=stock_pct,
-            target_success_rate=target_success_rate,
-            upper_guardrail_success=upper_guardrail_success,
-            lower_guardrail_success=lower_guardrail_success,
-            upper_adjustment_fraction=upper_adjustment_fraction,
-            lower_adjustment_fraction=lower_adjustment_fraction,
-            cashflows=cashflows
+            settings=settings,
         )
 
         # TODO for https://github.com/rogercost/fire-guardrails/issues/13
@@ -597,22 +673,7 @@ elif st.sidebar.button(
 
     results_df = utils.get_guardrail_withdrawals(
         df=shiller_df,
-        start_date=start_date,
-        end_date=computed_end_date,
-        analysis_start_date=analysis_start_date,
-        initial_value=initial_value,
-        initial_monthly_spending=initial_monthly_spending,
-        stock_pct=stock_pct,
-        target_success_rate=target_success_rate,
-        upper_guardrail_success=upper_guardrail_success,
-        lower_guardrail_success=lower_guardrail_success,
-        upper_adjustment_fraction=upper_adjustment_fraction,
-        lower_adjustment_fraction=lower_adjustment_fraction,
-        adjustment_threshold=adjustment_threshold,
-        adjustment_frequency=adjustment_frequency,
-        spending_cap=spending_cap_multiplier,
-        spending_floor=spending_floor_multiplier,
-        cashflows=cashflows,
+        settings=settings,
         verbose=True,
         on_progress=on_progress,
         on_status=on_status
@@ -620,7 +681,7 @@ elif st.sidebar.button(
 
     # Cache results in session state for re-render without recomputation
     st.session_state['results_df'] = results_df
-    st.session_state['last_run_params'] = sim_params
+    st.session_state['last_run_signature'] = sim_signature
     st.session_state['dirty'] = False
 
     # Remove status line entirely to place plots at the very top
