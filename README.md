@@ -16,7 +16,7 @@ This app is meant for theoretical experimentation purposes only. It is not finan
 ## Background Information
 
 * This [Kitces blog post](https://www.kitces.com/blog/risk-based-monte-carlo-probability-of-success-guardrails-retirement-distribution-hatchet/) lays out the conceptual framework. (It uses a Monte Carlo approach, where ours is a historical simulation.)
-* The [Everyone Adjusts Toolkit](https://openpath.financial/guardrails/) from Open Path Financial contains a YouTube tutorial on how the strategy works, as well as a link to get more information.
+* The [Everyone Adjusts Toolkit](https://openpath.financial/guardrails/) created by Aubrey Williams of Open Path Financial,LLC contains a YouTube tutorial on how the strategy works, as well as a link to get more information.
 
 ## Data Sources
 
