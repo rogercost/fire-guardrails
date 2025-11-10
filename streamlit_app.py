@@ -67,8 +67,10 @@ start_date = st.sidebar.date_input(
     value=today_date if is_guidance else datetime.date(1968, 4, 1),
     min_value=datetime.date(1871, 1, 1),
     max_value=today_date,
-    help="First retirement month used for withdrawals.\n\nIn Simulation Mode, the historical simulations begin from this date.\n\n"
-         "In Guidance Mode, this defaults to today. Even if retirement is already underway, the guidance is forward looking from today.",
+    help="First retirement date used for withdrawals.\n\nCurrently, only the year and month are used, due to the monthly nature of the Shiller "
+         "dataset. The day of the month is ignored.\n\nIn Simulation Mode, the historical simulations begin from this date.\n\n"
+         "In Guidance Mode, this defaults to today. Even if retirement is already underway, the guidance is forward looking from today.\n\n"
+         "(Hint: You can type the date in YYYY/MM/DD format instead of choosing it from the selector, which may be faster.)",
     disabled=is_guidance,  # In Guidance Mode, this is fixed to today
     on_change=_unmark_initial_spending_overridden,
 )
@@ -89,9 +91,11 @@ analysis_start_date = st.sidebar.date_input(
     min_value=datetime.date(1871, 1, 1),
     max_value=datetime.date.today(),
     on_change=_unmark_initial_spending_overridden,
-    help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nNote that when running historical "
+    help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nCurrently, only the year and month "
+         "are used, due to the monthly nature of the Shiller dataset. The day of the month is ignored.\n\nNote that when running historical "
          "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
-         "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!"
+         "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!\n\n"
+         "(Hint: You can type the date in YYYY/MM/DD format instead of choosing it from the selector, which may be faster.)"
 )
 
 # Numeric Inputs
