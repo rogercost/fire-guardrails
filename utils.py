@@ -338,6 +338,8 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
     }
 
 def is_adjustment_month(ts: pd.Timestamp, adjustment_frequency: str) -> bool:
+    """Determine whether the guardrail policy permits an adjustment in the given month."""
+
     month = int(ts.month)
     if adjustment_frequency == "Monthly":
         return True
@@ -594,7 +596,7 @@ def compute_guardrail_guidance_snapshot(
     df,
     asof_date,
     settings: Settings,
-):
+) -> dict:
     """Compute a single-point guidance snapshot (no historical loop).
 
     Parameters

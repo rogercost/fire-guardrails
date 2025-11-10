@@ -11,6 +11,8 @@ import pandas as pd
 
 
 def _relative_option_to_multiplier(option: Optional[str]) -> Optional[float]:
+    """Translate a relative spending selection into a multiplier when possible."""
+
     if option is None:
         return None
     option = option.strip()
