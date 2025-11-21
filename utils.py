@@ -434,7 +434,8 @@ def get_guardrail_withdrawals(
     for i, row in subset.iterrows():
         current_date = row['Date']
         months_remaining = len(subset) - i
-        adjustment_allowed = is_adjustment_month(current_date, settings.adjustment_frequency)
+        is_first_month = i == 0
+        adjustment_allowed = (not is_first_month) and is_adjustment_month(current_date, settings.adjustment_frequency)
 
         status_line = f"Processing {current_date.strftime('%Y-%m')}, portfolio=${current_portfolio_value:,.0f}, months_remaining={months_remaining}"
         if on_status is not None:
