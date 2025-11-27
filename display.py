@@ -463,9 +463,6 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
 def render_guidance_results(snap: dict):
     """Summarize the guardrail guidance snapshot as advisor-friendly bullet points."""
 
-    # TODO for https://github.com/rogercost/fire-guardrails/issues/13
-    # Create a nice tabular or graphic display, move logic to display module
-
     def fmt_money(x):
         # Escape the dollar sign so Streamlit Markdown doesn't interpret $...$ as LaTeX math
         return f"\\${x:,.0f}" if (x is not None and (isinstance(x, (int, float)) and not np.isinf(x))) else "N/A"
@@ -477,6 +474,7 @@ def render_guidance_results(snap: dict):
     start_month = snap.get("target_monthly_spending")
     start_year = (start_month * 12.0) if start_month is not None else None
     start_net_withdrawal = snap.get("target_monthly_withdrawal")
+    start_annual_withdrawal = snap.get("target_annual_withdrawal")
 
     upper_val = snap.get("upper_guardrail_value")
     lower_val = snap.get("lower_guardrail_value")
@@ -490,6 +488,7 @@ def render_guidance_results(snap: dict):
     low_adj_year = (low_adj_month * 12.0) if low_adj_month is not None else None
 
     cashflow_month0 = snap.get("current_cashflow")
+    annual_cashflow_total = snap.get("annual_cashflow_total")
 
     def fmt_month(ts):
         if ts is None or pd.isna(ts):
@@ -502,20 +501,48 @@ def render_guidance_results(snap: dict):
         "Use this mode to generate forward-looking guidance for a client who is retired today and in drawdown.\n\n"
         "For more information, see the [official documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
 
-    if start_wr is not None:
-        st.markdown(
-            f"* **Target Withdrawal Rate:** {start_wr * 100:.2f}% "
-            f"({fmt_money(start_month)}/month or {fmt_money(start_year)}/year total spending based on the Initial Portfolio Value) "
-            f"— portfolio withdrawal after cashflows: {fmt_money(start_net_withdrawal)}/month"
-        )
-    else:
-        st.markdown("**Starting Withdrawal Rate:** N/A")
+    spending_notes = (
+        f"{start_wr * 100:.2f}% withdrawal rate" if start_wr is not None else "Based on Initial Portfolio Value"
+    )
 
-    st.markdown(
-        f"* **Upper Guardrail Portfolio Value:** {fmt_money(upper_val)} based on the Current Monthly Spending\n  * If client's portfolio value exceeds this, adjust "
-        f"spending by {fmt_pct(up_adj_pct)} to {fmt_money(up_adj_month)}/month or {fmt_money(up_adj_year)}/year"
-    )
-    st.markdown(
-        f"* **Lower Guardrail Portfolio Value:** {fmt_money(lower_val)} based on the Current Monthly Spending\n  * If client's portfolio value falls below this, adjust "
-        f"spending by {fmt_pct(low_adj_pct)} to {fmt_money(low_adj_month)}/month or {fmt_money(low_adj_year)}/year"
-    )
+    summary_rows = [
+        {
+            "Metric": "Target Spending",
+            "Monthly": fmt_money(start_month),
+            "Annual": fmt_money(start_year),
+            "Notes": spending_notes,
+        },
+        {
+            "Metric": "Portfolio Withdrawal After Cashflows",
+            "Monthly": fmt_money(start_net_withdrawal),
+            "Annual": fmt_money(start_annual_withdrawal),
+            "Notes": "Net amount after monthly cashflows",
+        },
+        {
+            "Metric": "Current Monthly Cashflow",
+            "Monthly": fmt_money(cashflow_month0),
+            "Annual": fmt_money(annual_cashflow_total),
+            "Notes": "Cash inflows/outflows at month 0",
+        },
+    ]
+
+    st.table(pd.DataFrame(summary_rows).set_index("Metric"))
+
+    guardrail_rows = [
+        {
+            "Guardrail": "Upper",
+            "Trigger (Portfolio Value)": fmt_money(upper_val),
+            "Adjustment": fmt_pct(up_adj_pct),
+            "New Spending (Monthly)": fmt_money(up_adj_month),
+            "New Spending (Annual)": fmt_money(up_adj_year),
+        },
+        {
+            "Guardrail": "Lower",
+            "Trigger (Portfolio Value)": fmt_money(lower_val),
+            "Adjustment": fmt_pct(low_adj_pct),
+            "New Spending (Monthly)": fmt_money(low_adj_month),
+            "New Spending (Annual)": fmt_money(low_adj_year),
+        },
+    ]
+
+    st.table(pd.DataFrame(guardrail_rows).set_index("Guardrail"))
