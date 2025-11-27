@@ -190,6 +190,27 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         subplot_titles=("Portfolio Value vs Guardrails", "Withdrawals Over Time")
     )
 
+    initial_portfolio_value = st.session_state.get("initial_portfolio_value")
+    try:
+        initial_portfolio_value = float(initial_portfolio_value)
+    except (TypeError, ValueError):
+        initial_portfolio_value = None
+
+    withdrawal_customdata = None
+    fixed_withdrawal_customdata = None
+    if initial_portfolio_value and initial_portfolio_value > 0:
+        withdrawal_customdata = np.column_stack([
+            (results_df['Withdrawal'].astype(float) * 12.0) / initial_portfolio_value
+        ])
+        fixed_withdrawal_series = (
+            results_df['Fixed_WR_Withdrawal'].astype(float)
+            if 'Fixed_WR_Withdrawal' in results_df.columns
+            else np.full(len(results_df), init_withdrawal, dtype=float)
+        )
+        fixed_withdrawal_customdata = np.column_stack([
+            (fixed_withdrawal_series * 12.0) / initial_portfolio_value
+        ])
+
     if 'Fixed_WR_Value' in results_df.columns:
         fig.add_trace(
             go.Scatter(
@@ -244,6 +265,16 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         col=1
     )
 
+    withdrawal_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}'
+    if withdrawal_customdata is not None:
+        withdrawal_hovertemplate += '<br>Annual WR: %{customdata[0]:.2%}'
+    withdrawal_hovertemplate += '<extra></extra>'
+
+    fixed_withdrawal_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}'
+    if fixed_withdrawal_customdata is not None:
+        fixed_withdrawal_hovertemplate += '<br>Annual WR: %{customdata[0]:.2%}'
+    fixed_withdrawal_hovertemplate += '<extra></extra>'
+
     fig.add_trace(
         go.Scatter(
             x=results_df['Date'],
@@ -251,7 +282,8 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             mode='lines',
             name='Withdrawal',
             line=dict(color='#9467bd'),
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            customdata=withdrawal_customdata,
+            hovertemplate=withdrawal_hovertemplate
         ),
         row=2,
         col=1
@@ -289,7 +321,8 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             mode='lines',
             name='Initial Withdrawal',
             line=dict(color='#7f7f7f', dash='dash'),
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            customdata=fixed_withdrawal_customdata,
+            hovertemplate=fixed_withdrawal_hovertemplate
         ),
         row=2,
         col=1
