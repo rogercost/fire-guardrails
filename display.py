@@ -190,28 +190,6 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         subplot_titles=("Portfolio Value vs Guardrails", "Withdrawals Over Time")
     )
 
-    initial_portfolio_value = st.session_state.get("initial_portfolio_value")
-    try:
-        initial_portfolio_value = float(initial_portfolio_value)
-    except (TypeError, ValueError):
-        initial_portfolio_value = None
-
-    withdrawal_customdata = None
-    fixed_withdrawal_customdata = None
-    total_income_customdata = None
-    if initial_portfolio_value and initial_portfolio_value > 0:
-        withdrawal_customdata = np.column_stack([
-            (results_df['Withdrawal'].astype(float) * 12.0) / initial_portfolio_value
-        ])
-        fixed_withdrawal_series = (
-            results_df['Fixed_WR_Withdrawal'].astype(float)
-            if 'Fixed_WR_Withdrawal' in results_df.columns
-            else np.full(len(results_df), init_withdrawal, dtype=float)
-        )
-        fixed_withdrawal_customdata = np.column_stack([
-            (fixed_withdrawal_series * 12.0) / initial_portfolio_value
-        ])
-
     initial_total_income = None
     if 'Total_Income' in results_df.columns and not results_df.empty:
         initial_total_income = float(results_df['Total_Income'].iloc[0])
@@ -277,10 +255,6 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         col=1
     )
 
-    withdrawal_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-
-    fixed_withdrawal_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
-
     fig.add_trace(
         go.Scatter(
             x=results_df['Date'],
@@ -288,8 +262,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             mode='lines',
             name='Withdrawal',
             line=dict(color='#9467bd'),
-            customdata=withdrawal_customdata,
-            hovertemplate=withdrawal_hovertemplate
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
         ),
         row=2,
         col=1
@@ -310,7 +283,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
     if 'Total_Income' in results_df.columns:
         total_income_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}'
         if total_income_customdata is not None:
-            total_income_hovertemplate += '<br>Difference: %{customdata[0]:+$,.2f}'
+            total_income_hovertemplate += '<br>Difference: $%{customdata[0]:+,.2f}'
             if initial_total_income not in (None, 0):
                 total_income_hovertemplate += '<br>% Difference: %{customdata[1]:+.1%}'
         total_income_hovertemplate += '<extra></extra>'
@@ -334,8 +307,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             mode='lines',
             name='Initial Withdrawal',
             line=dict(color='#7f7f7f', dash='dash'),
-            customdata=fixed_withdrawal_customdata,
-            hovertemplate=fixed_withdrawal_hovertemplate
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
         ),
         row=2,
         col=1
