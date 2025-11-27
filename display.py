@@ -198,6 +198,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
 
     withdrawal_customdata = None
     fixed_withdrawal_customdata = None
+    total_income_customdata = None
     if initial_portfolio_value and initial_portfolio_value > 0:
         withdrawal_customdata = np.column_stack([
             (results_df['Withdrawal'].astype(float) * 12.0) / initial_portfolio_value
@@ -209,6 +210,17 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         )
         fixed_withdrawal_customdata = np.column_stack([
             (fixed_withdrawal_series * 12.0) / initial_portfolio_value
+        ])
+
+    initial_total_income = None
+    if 'Total_Income' in results_df.columns and not results_df.empty:
+        initial_total_income = float(results_df['Total_Income'].iloc[0])
+        total_income_diff = results_df['Total_Income'].astype(float) - initial_total_income
+        percent_denominator = initial_total_income if initial_total_income != 0 else np.nan
+        total_income_pct_diff = total_income_diff / percent_denominator
+        total_income_customdata = np.column_stack([
+            total_income_diff,
+            total_income_pct_diff
         ])
 
     if 'Fixed_WR_Value' in results_df.columns:
@@ -302,6 +314,12 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             col=1
         )
     if 'Total_Income' in results_df.columns:
+        total_income_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}'
+        if total_income_customdata is not None:
+            total_income_hovertemplate += '<br>Difference: %{customdata[0]:+$,.0f}'
+            if initial_total_income not in (None, 0):
+                total_income_hovertemplate += '<br>% Difference: %{customdata[1]:+.1%}'
+        total_income_hovertemplate += '<extra></extra>'
         fig.add_trace(
             go.Scatter(
                 x=results_df['Date'],
@@ -309,7 +327,8 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
                 mode='lines',
                 name='Total Income',
                 line=dict(color='#bcbd22'),
-                hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+                customdata=total_income_customdata,
+                hovertemplate=total_income_hovertemplate
             ),
             row=2,
             col=1
