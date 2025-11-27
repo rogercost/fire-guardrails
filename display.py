@@ -277,15 +277,9 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         col=1
     )
 
-    withdrawal_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}'
-    if withdrawal_customdata is not None:
-        withdrawal_hovertemplate += '<br>Annual WR: %{customdata[0]:.2%}'
-    withdrawal_hovertemplate += '<extra></extra>'
+    withdrawal_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
 
-    fixed_withdrawal_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}'
-    if fixed_withdrawal_customdata is not None:
-        fixed_withdrawal_hovertemplate += '<br>Annual WR: %{customdata[0]:.2%}'
-    fixed_withdrawal_hovertemplate += '<extra></extra>'
+    fixed_withdrawal_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
 
     fig.add_trace(
         go.Scatter(
@@ -316,7 +310,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
     if 'Total_Income' in results_df.columns:
         total_income_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}'
         if total_income_customdata is not None:
-            total_income_hovertemplate += '<br>Difference: %{customdata[0]:+$,.0f}'
+            total_income_hovertemplate += '<br>Difference: %{customdata[0]:+$,.2f}'
             if initial_total_income not in (None, 0):
                 total_income_hovertemplate += '<br>% Difference: %{customdata[1]:+.1%}'
         total_income_hovertemplate += '<extra></extra>'
