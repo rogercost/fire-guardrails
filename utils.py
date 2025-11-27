@@ -632,6 +632,10 @@ def compute_guardrail_guidance_snapshot(
     monthly_cashflows = cashflow_schedule_for_window(cashflows, num_months, 0)
     current_cashflow_amount = float(monthly_cashflows[0]) if len(monthly_cashflows) > 0 else 0.0
 
+    # Totals over the coming year for cashflows and withdrawals net of cashflows
+    first_year_months = min(12, len(monthly_cashflows))
+    annual_cashflow_total = float(np.sum(monthly_cashflows[:first_year_months])) if first_year_months else 0.0
+
     # Helper to compute WR for a given success rate at 'asof'
     def _wr(desired_sr: float):
         res = get_wr_for_fixed_success_rate(
@@ -712,8 +716,15 @@ def compute_guardrail_guidance_snapshot(
         else None
     )
     target_monthly_withdrawal = None
+    target_annual_withdrawal = None
     if target_monthly_spending is not None:
         target_monthly_withdrawal = max(target_monthly_spending - current_cashflow_amount, 0.0)
+        if first_year_months:
+            annual_withdrawals = [
+                max(float(target_monthly_spending) - float(cf), 0.0)
+                for cf in monthly_cashflows[:first_year_months]
+            ]
+            target_annual_withdrawal = float(np.sum(annual_withdrawals))
 
     return {
         "asof_date": asof,
@@ -722,6 +733,7 @@ def compute_guardrail_guidance_snapshot(
         "target_withdrawal_rate": target_wr,
         "target_monthly_spending": target_monthly_spending,
         "target_monthly_withdrawal": target_monthly_withdrawal,
+        "target_annual_withdrawal": target_annual_withdrawal,
         "upper_guardrail_value": upper_guardrail_value,
         "lower_guardrail_value": lower_guardrail_value,
         "upper_adjusted_monthly": adj_upper_monthly,
@@ -729,4 +741,5 @@ def compute_guardrail_guidance_snapshot(
         "lower_adjusted_monthly": adj_lower_monthly,
         "lower_adjustment_pct": _pct_change(adj_lower_monthly),
         "current_cashflow": current_cashflow_amount,
+        "annual_cashflow_total": annual_cashflow_total,
     }

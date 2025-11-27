@@ -474,6 +474,7 @@ def render_guidance_results(snap: dict):
     start_month = snap.get("target_monthly_spending")
     start_year = (start_month * 12.0) if start_month is not None else None
     start_net_withdrawal = snap.get("target_monthly_withdrawal")
+    start_annual_withdrawal = snap.get("target_annual_withdrawal")
 
     upper_val = snap.get("upper_guardrail_value")
     lower_val = snap.get("lower_guardrail_value")
@@ -487,6 +488,7 @@ def render_guidance_results(snap: dict):
     low_adj_year = (low_adj_month * 12.0) if low_adj_month is not None else None
 
     cashflow_month0 = snap.get("current_cashflow")
+    annual_cashflow_total = snap.get("annual_cashflow_total")
 
     def fmt_month(ts):
         if ts is None or pd.isna(ts):
@@ -499,29 +501,27 @@ def render_guidance_results(snap: dict):
         "Use this mode to generate forward-looking guidance for a client who is retired today and in drawdown.\n\n"
         "For more information, see the [official documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
 
+    spending_notes = (
+        f"{start_wr * 100:.2f}% withdrawal rate" if start_wr is not None else "Based on Initial Portfolio Value"
+    )
+
     summary_rows = [
-        {
-            "Metric": "Target Withdrawal Rate",
-            "Monthly": "—",
-            "Annual": "—",
-            "Notes": f"{start_wr * 100:.2f}%" if start_wr is not None else "N/A",
-        },
         {
             "Metric": "Target Spending",
             "Monthly": fmt_money(start_month),
             "Annual": fmt_money(start_year),
-            "Notes": "Based on Initial Portfolio Value",
+            "Notes": spending_notes,
         },
         {
             "Metric": "Portfolio Withdrawal After Cashflows",
             "Monthly": fmt_money(start_net_withdrawal),
-            "Annual": "—",
+            "Annual": fmt_money(start_annual_withdrawal),
             "Notes": "Net amount after monthly cashflows",
         },
         {
             "Metric": "Current Monthly Cashflow",
             "Monthly": fmt_money(cashflow_month0),
-            "Annual": fmt_money((cashflow_month0 * 12.0) if cashflow_month0 is not None else None),
+            "Annual": fmt_money(annual_cashflow_total),
             "Notes": "Cash inflows/outflows at month 0",
         },
     ]
