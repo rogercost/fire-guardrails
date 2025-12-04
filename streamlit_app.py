@@ -147,6 +147,7 @@ isr_params = {
     'stock_pct': float(stock_pct),
     # Use current target_success_rate if available, otherwise default of 0.90
     'desired_success_rate': float(st.session_state.get('target_success_rate', 0.90)),
+    'final_value_target': float(st.session_state.get('final_value_target', 0.0)),
     'cashflows': controls.cashflows_to_tuple(sanitized_cashflows),
 }
 isr_label_suffix = ""
@@ -244,6 +245,7 @@ try:
         'lower_sr': float(st.session_state.get("lower_guardrail_success", 0.75)),
         'isr': float(st.session_state.get('isr_value')) if st.session_state.get('isr_value') is not None else None,
         'initial_spending': float(st.session_state.get("initial_monthly_spending", 0.0)),
+        'final_value_target': float(st.session_state.get('final_value_target', 0.0)),
         'cashflows': controls.cashflows_to_tuple(sanitized_cashflows),
     }
 
@@ -376,6 +378,19 @@ with st.sidebar.expander("Advanced Controls"):
         help="Minimum spending level as a percent of the initial monthly spending.",
         disabled = is_guidance  # In Guidance Mode, no decision gating, it's up to the adviser and client
     )
+    st.number_input(
+        "Final Value Target (Bequest)",
+        value=controls.get_float_state("final_value_target", 0.0),
+        min_value=0.0,
+        max_value=float(initial_value),
+        step=10000.0,
+        format="%.0f",
+        key="final_value_target",
+        help="Minimum ending portfolio value required for a simulation to be considered successful. "
+             "Set to $0 for no bequest requirement. When set higher, the simulation will count "
+             "as a failure if the portfolio ends below this amount, even if it never depleted. "
+             "This affects both the success rate calculation and the recommended safe spending rate.",
+    )
 
     if st.button("Add Recurring Cashflow", key="add_cashflow_btn"):
         st.session_state["cashflows"].append({
@@ -413,6 +428,7 @@ settings = Settings(
     adjustment_frequency=adjustment_frequency,
     spending_cap_option=st.session_state.get("spending_cap_option", "Unlimited"),
     spending_floor_option=st.session_state.get("spending_floor_option", "Unlimited"),
+    final_value_target=float(st.session_state.get("final_value_target", 0.0)),
     cashflows=cashflow_settings,
 )
 

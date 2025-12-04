@@ -56,6 +56,7 @@ def update_isr_dynamic_label(isr_params: dict, is_guidance: bool, cashflows: lis
         max_iterations=50,
         verbose=False,
         cashflows=cashflows,
+        final_value_target=isr_params.get('final_value_target', 0.0),
     )
     st.session_state['isr_value'] = float(res['spending_rate']) if res['spending_rate'] is not None else None
     st.session_state['isr_params'] = isr_params
@@ -72,6 +73,7 @@ def update_guardrail_dynamic_labels(gr_params: dict, is_guidance: bool, cashflow
 
     # First-period spending used to determine portfolio values that align with the guardrails
     first_month_spending = float(gr_params.get('initial_spending', 0.0))
+    final_value_target = gr_params.get('final_value_target', 0.0)
 
     # Compute spending rates at start of retirement using retirement start date as analysis end date
     upper_res = utils.get_spending_rate_for_fixed_success_rate(
@@ -86,6 +88,7 @@ def update_guardrail_dynamic_labels(gr_params: dict, is_guidance: bool, cashflow
         max_iterations=50,
         verbose=False,
         cashflows=cashflows,
+        final_value_target=final_value_target,
     )
 
     lower_res = utils.get_spending_rate_for_fixed_success_rate(
@@ -100,6 +103,7 @@ def update_guardrail_dynamic_labels(gr_params: dict, is_guidance: bool, cashflow
         max_iterations=50,
         verbose=False,
         cashflows=cashflows,
+        final_value_target=final_value_target,
     )
 
     upper_sr = float(upper_res['spending_rate']) if upper_res['spending_rate'] is not None else None
@@ -138,14 +142,14 @@ def update_initial_spending_label(initial_spending: float,
                                   overridden: bool) -> None:
     """Compute the dynamic label text and color for the Initial Monthly Spending control."""
 
-    wr = None
+    spending_rate = None
     if initial_value and initial_value > 0:
-        wr = (initial_spending * 12.0) / float(initial_value)
+        spending_rate = (initial_spending * 12.0) / float(initial_value)
 
-    if wr is not None and np.isfinite(wr):
-        label_text = f"Initial Monthly Spending ({wr * 100:.2f}% WR)"
+    if spending_rate is not None and np.isfinite(spending_rate):
+        label_text = f"Initial Monthly Spending ({spending_rate * 100:.2f}% SR)"
     else:
-        label_text = "Initial Monthly Spending (WR: N/A)"
+        label_text = "Initial Monthly Spending (SR: N/A)"
 
     label_color = None
     if overridden and auto_spending is not None:

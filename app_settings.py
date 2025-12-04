@@ -85,6 +85,7 @@ class Settings:
     adjustment_frequency: str
     spending_cap_option: str
     spending_floor_option: str
+    final_value_target: float = 0.0
     cashflows: List[CashflowSetting] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -104,6 +105,7 @@ class Settings:
         self.adjustment_frequency = str(self.adjustment_frequency)
         self.spending_cap_option = str(self.spending_cap_option)
         self.spending_floor_option = str(self.spending_floor_option)
+        self.final_value_target = float(self.final_value_target)
 
         # Validation
         if self.initial_value <= 0:
@@ -138,6 +140,15 @@ class Settings:
             raise ValueError(
                 f"Historical analysis start date ({self.analysis_start_date}) cannot be after "
                 f"retirement start date ({self.start_date})"
+            )
+        if self.final_value_target < 0:
+            raise ValueError(
+                f"Final value target cannot be negative, got {self.final_value_target:,.0f}"
+            )
+        if self.final_value_target > self.initial_value:
+            raise ValueError(
+                f"Final value target ({self.final_value_target:,.0f}) cannot exceed "
+                f"initial portfolio value ({self.initial_value:,.0f})"
             )
 
         # Clean cashflows
@@ -182,6 +193,7 @@ class Settings:
             "cashflows": tuple(flow.signature() for flow in self.cashflows),
             "initial_monthly_spending": float(self.initial_monthly_spending),
             "initial_spending_overridden": bool(self.initial_spending_overridden),
+            "final_value_target": float(self.final_value_target),
         }
 
     def retirement_end_date(self) -> Optional[dt.date]:
@@ -213,6 +225,7 @@ class Settings:
             "adjustment_frequency": self.adjustment_frequency,
             "spending_cap_option": self.spending_cap_option,
             "spending_floor_option": self.spending_floor_option,
+            "final_value_target": float(self.final_value_target),
             "cashflows": [flow.to_serializable() for flow in self.cashflows],
         }
 
@@ -252,6 +265,7 @@ class Settings:
             adjustment_frequency=data.get("adjustment_frequency", "Monthly"),
             spending_cap_option=data.get("spending_cap_option", "Unlimited"),
             spending_floor_option=data.get("spending_floor_option", "Unlimited"),
+            final_value_target=data.get("final_value_target", 0.0),
             cashflows=cashflows_clean,
         )
 
@@ -304,6 +318,7 @@ class Settings:
         session_state["adjustment_frequency"] = self.adjustment_frequency
         session_state["spending_cap_option"] = self.spending_cap_option
         session_state["spending_floor_option"] = self.spending_floor_option
+        session_state["final_value_target"] = self.final_value_target
         session_state["cashflows"] = [flow.to_serializable() for flow in self.cashflows]
 
     def to_isr_params(self) -> Dict[str, Any]:
@@ -315,6 +330,7 @@ class Settings:
             "initial_value": float(self.initial_value),
             "stock_pct": float(self.stock_pct),
             "desired_success_rate": float(self.target_success_rate),
+            "final_value_target": float(self.final_value_target),
         }
 
     def to_guardrail_params(self) -> Dict[str, Any]:
@@ -327,4 +343,5 @@ class Settings:
             "upper_sr": float(self.upper_guardrail_success),
             "lower_sr": float(self.lower_guardrail_success),
             "initial_spending": float(self.initial_monthly_spending),
+            "final_value_target": float(self.final_value_target),
         }
