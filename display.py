@@ -177,7 +177,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         if pd.isna(value):
             return "N/A"
         # Format the absolute value with thousands separator and two decimal places
-        formatted_abs_value = f"{abs(value):,.2f}"
+        formatted_abs_value = f"{abs(value):,.0f}"
         if value < 0:
             return f"-${formatted_abs_value}"
         else:
@@ -225,7 +225,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
                 name='Value w/Fixed WR',
                 line=dict(color='#7f7f7f'),
                 opacity=0.6,
-                hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+                hovertemplate='<b>%{fullData.name}</b>: $%{y:,.0f}<extra></extra>'
             ),
             row=1,
             col=1
@@ -239,7 +239,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             name='Upper Guardrail',
             line=dict(color='#2ca02c'),
             opacity=0.45,
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.0f}<extra></extra>'
         ),
         row=1,
         col=1
@@ -252,7 +252,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             name='Lower Guardrail',
             line=dict(color='#d62728'),
             opacity=0.45,
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.0f}<extra></extra>'
         ),
         row=1,
         col=1
@@ -264,7 +264,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             mode='lines',
             name='Portfolio Value',
             line=dict(color='#1f77b4'),
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.0f}<extra></extra>'
         ),
         row=1,
         col=1
@@ -277,7 +277,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             mode='lines',
             name='Withdrawal',
             line=dict(color='#9467bd'),
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.0f}<extra></extra>'
         ),
         row=2,
         col=1
@@ -290,13 +290,13 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
                 mode='lines',
                 name='Net Cashflow',
                 line=dict(color='#17becf', dash='dot'),
-                hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+                hovertemplate='<b>%{fullData.name}</b>: $%{y:,.0f}<extra></extra>'
             ),
             row=2,
             col=1
         )
     if 'Total_Income' in results_df.columns:
-        total_income_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}'
+        total_income_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.0f}'
         if total_income_customdata is not None:
             total_income_hovertemplate += '<br>Difference: %{customdata[0]}' # Use pre-formatted string directly
             if initial_total_income not in (None, 0):
@@ -322,7 +322,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             mode='lines',
             name='Initial Withdrawal',
             line=dict(color='#7f7f7f', dash='dash'),
-            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.2f}<extra></extra>'
+            hovertemplate='<b>%{fullData.name}</b>: $%{y:,.0f}<extra></extra>'
         ),
         row=2,
         col=1
