@@ -43,6 +43,15 @@ def needs_update(path, days=30):
 
 
 # Data loading function
+def get_cached_shiller_df(session_state):
+    """Return Shiller data from session cache, loading if necessary."""
+    shiller_df = session_state.get('shiller_df')
+    if shiller_df is None:
+        shiller_df = load_shiller_data()
+        session_state['shiller_df'] = shiller_df
+    return shiller_df
+
+
 def load_shiller_data():
     """
     Loads and preprocesses the Shiller data.
@@ -118,6 +127,17 @@ def cashflow_schedule_for_window(cashflows, window_length, start_offset=0):
     return schedule
 
 
+def compute_portfolio_returns(stock_prices, bond_prices, stock_pct):
+    """Compute blended portfolio returns from stock and bond price series."""
+    stock_returns = np.ones(len(stock_prices))
+    stock_returns[1:] = stock_prices[1:] / stock_prices[:-1]
+
+    bond_returns = np.ones(len(bond_prices))
+    bond_returns[1:] = bond_prices[1:] / bond_prices[:-1]
+
+    return float(stock_pct) * stock_returns + (1 - float(stock_pct)) * bond_returns
+
+
 @nb.jit(nopython=True)
 def test_all_periods(portfolio_returns, num_months, initial_value, monthly_spending, monthly_cashflows):
     """
@@ -166,15 +186,7 @@ def calculate_success_rate(df, withdrawal_rate, num_months, stock_pct=0.75,
     # Calculate portfolio returns
     stock_prices = df_filtered['Real Total Return Price'].values
     bond_prices = df_filtered['Real Total Bond Returns'].values
-
-    stock_returns = np.ones(len(stock_prices))
-    stock_returns[1:] = stock_prices[1:] / stock_prices[:-1]
-
-    bond_returns = np.ones(len(bond_prices))
-    bond_returns[1:] = bond_prices[1:] / bond_prices[:-1]
-
-    stock_pct = float(stock_pct)
-    portfolio_returns = stock_pct * stock_returns + (1 - stock_pct) * bond_returns
+    portfolio_returns = compute_portfolio_returns(stock_prices, bond_prices, stock_pct)
     monthly_spending = initial_value * withdrawal_rate / 12
 
     if monthly_cashflows is None:
@@ -337,6 +349,32 @@ def get_spending_rate_for_fixed_success_rate(df, desired_success_rate, num_month
         'iterations': iteration + 1
     }
 
+def _compute_spending_rate_at_date(
+    df,
+    success_rate: float,
+    months_remaining: int,
+    analysis_start_date,
+    current_date,
+    current_portfolio_value: float,
+    stock_pct: float,
+    cashflows: list,
+    cashflow_schedule_slice,
+) -> float:
+    """Compute spending rate for a given success rate at a specific point in time."""
+    result = get_spending_rate_for_fixed_success_rate(
+        df=df,
+        desired_success_rate=success_rate,
+        num_months=months_remaining,
+        analysis_start_date=analysis_start_date,
+        analysis_end_date=current_date,
+        initial_value=current_portfolio_value,
+        stock_pct=stock_pct,
+        cashflows=cashflows,
+        cashflow_schedule=cashflow_schedule_slice,
+    )
+    return result['spending_rate']
+
+
 def is_adjustment_month(ts: pd.Timestamp, adjustment_frequency: str) -> bool:
     """Determine whether the guardrail policy permits an adjustment in the given month."""
 
@@ -396,15 +434,7 @@ def get_guardrail_withdrawals(
     # Pre-compute portfolio returns for the entire historical period (for speed)
     all_stock_prices = df['Real Total Return Price'].values
     all_bond_prices = df['Real Total Bond Returns'].values
-
-    stock_returns = np.ones(len(all_stock_prices))
-    stock_returns[1:] = all_stock_prices[1:] / all_stock_prices[:-1]
-
-    bond_returns = np.ones(len(all_bond_prices))
-    bond_returns[1:] = all_bond_prices[1:] / all_bond_prices[:-1]
-
-    stock_pct = float(settings.stock_pct)
-    portfolio_returns = stock_pct * stock_returns + (1 - stock_pct) * bond_returns
+    portfolio_returns = compute_portfolio_returns(all_stock_prices, all_bond_prices, settings.stock_pct)
 
     # Initialize results storage
     results = []
@@ -444,27 +474,21 @@ def get_guardrail_withdrawals(
             on_progress(i + 1, total_months)
 
         current_cashflow = float(monthly_cashflows[i]) if i < len(monthly_cashflows) else 0.0
+        schedule_slice = monthly_cashflows[i:i + months_remaining]
 
-        def get_spending_rate(success_rate):
-            schedule_slice = monthly_cashflows[i:i + months_remaining]
-            return get_spending_rate_for_fixed_success_rate(
-                df=df,
-                desired_success_rate=success_rate,
-                num_months=months_remaining,
-                analysis_start_date=settings.analysis_start_date,
-                analysis_end_date=current_date,
-                initial_value=current_portfolio_value,
-                stock_pct=settings.stock_pct,
-                cashflows=cashflows,
-                cashflow_schedule=schedule_slice,
-            )['spending_rate']
+        def get_sr(success_rate):
+            return _compute_spending_rate_at_date(
+                df, success_rate, months_remaining, settings.analysis_start_date,
+                current_date, current_portfolio_value, settings.stock_pct,
+                cashflows, schedule_slice,
+            )
 
         if not guardrail_depleted:
 
             # Calculate the upper and lower guardrail spending rates, based on the current spending and months remaining
             #
-            upper_sr = get_spending_rate(success_rate=settings.upper_guardrail_success)
-            lower_sr = get_spending_rate(success_rate=settings.lower_guardrail_success)
+            upper_sr = get_sr(settings.upper_guardrail_success)
+            lower_sr = get_sr(settings.lower_guardrail_success)
 
             # The guardrail portfolio values are the values that would result in the current spending amount
             # representing a probability of success equal to each guardrail's probability.
@@ -486,7 +510,7 @@ def get_guardrail_withdrawals(
                     desired_success_rate = settings.upper_guardrail_success + settings.upper_adjustment_fraction * (
                         settings.target_success_rate - settings.upper_guardrail_success
                     )
-                    new_sr = get_spending_rate(success_rate=desired_success_rate)
+                    new_sr = get_sr(desired_success_rate)
                     new_proposed_spending = current_portfolio_value * new_sr / 12
                     guardrail_hit = "UPPER"
 
@@ -494,7 +518,7 @@ def get_guardrail_withdrawals(
                     desired_success_rate = settings.lower_guardrail_success + settings.lower_adjustment_fraction * (
                         settings.target_success_rate - settings.lower_guardrail_success
                     )
-                    new_sr = get_spending_rate(success_rate=desired_success_rate)
+                    new_sr = get_sr(desired_success_rate)
                     new_proposed_spending = current_portfolio_value * new_sr / 12
                     guardrail_hit = "LOWER"
 

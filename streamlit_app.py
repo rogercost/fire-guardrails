@@ -436,11 +436,7 @@ if dirty and not is_guidance:
 if is_guidance:
     # Guidance Mode: run a single-iteration snapshot and display text output
 
-    # Load Shiller data (cached)
-    shiller_df = st.session_state.get('shiller_df')
-    if shiller_df is None:
-        shiller_df = utils.load_shiller_data()
-        st.session_state['shiller_df'] = shiller_df
+    shiller_df = utils.get_cached_shiller_df(st.session_state)
 
     # Use the latest available Shiller data date (<= today) as the as-of date.
     today = datetime.date.today()
@@ -465,10 +461,7 @@ elif st.sidebar.button(
 ):
     status_ph = st.empty()
     status_ph.text("Loading Shiller data...")
-    shiller_df = st.session_state.get('shiller_df')
-    if shiller_df is None:
-        shiller_df = utils.load_shiller_data()
-        st.session_state['shiller_df'] = shiller_df
+    shiller_df = utils.get_cached_shiller_df(st.session_state)
     status_ph.text("Shiller data loaded.")
 
     # Progress bar shown in the same status line area (0% -> 100%)

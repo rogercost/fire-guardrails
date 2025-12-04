@@ -4,34 +4,45 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
-from typing import Optional
+from typing import Optional, Tuple
 import utils
+
+
+def _fmt_currency(value, escape_for_markdown: bool = False) -> str:
+    """Format a currency value with optional Markdown escaping."""
+    if value is None or (isinstance(value, float) and (pd.isna(value) or not np.isfinite(value))):
+        return "N/A"
+    prefix = "\\$" if escape_for_markdown else "$"
+    if value < 0:
+        return f"-{prefix}{abs(value):,.0f}"
+    return f"{prefix}{value:,.0f}"
+
+
+def _resolve_analysis_horizon(shiller_df, params: dict, is_guidance: bool, context: str) -> Tuple[int, pd.Timestamp]:
+    """Compute num_months and analysis_end_date based on mode and params."""
+    if is_guidance:
+        latest_shiller_date = pd.to_datetime(shiller_df["Date"].max())
+        today = pd.to_datetime(datetime.date.today())
+        analysis_end_date = latest_shiller_date if latest_shiller_date <= today else today
+        num_months = params['duration_months']
+        if num_months <= 0:
+            num_months = 360
+    else:
+        num_months = params['duration_months']
+        if num_months <= 0:
+            raise ValueError(f"Invalid retirement duration to compute {context}.")
+        analysis_end_date = params['start_date']
+    return num_months, analysis_end_date
 
 
 def update_isr_dynamic_label(isr_params: dict, is_guidance: bool, cashflows: list):
     """
     Updates the dynamic label on the target success rate input that shows the corresponding initial spending rate.
     """
-    # Ensure Shiller data is loaded or cached in session_state
-    shiller_df = st.session_state.get('shiller_df')
-    if shiller_df is None:
-        shiller_df = utils.load_shiller_data()
-        st.session_state['shiller_df'] = shiller_df
-
-    # Determine horizon length in months based on duration input
-    if is_guidance:
-        latest_shiller_date = pd.to_datetime(shiller_df["Date"].max())
-        asof_for_isr = latest_shiller_date if latest_shiller_date <= pd.to_datetime(
-            datetime.date.today()) else pd.to_datetime(datetime.date.today())
-        num_months = isr_params['duration_months']
-        if num_months <= 0:
-            num_months = 360
-        analysis_end_date_used = asof_for_isr
-    else:
-        num_months = isr_params['duration_months']
-        if num_months <= 0:
-            raise ValueError("Invalid retirement duration to compute initial spending rate.")
-        analysis_end_date_used = isr_params['start_date']
+    shiller_df = utils.get_cached_shiller_df(st.session_state)
+    num_months, analysis_end_date_used = _resolve_analysis_horizon(
+        shiller_df, isr_params, is_guidance, "initial spending rate"
+    )
 
     res = utils.get_spending_rate_for_fixed_success_rate(
         df=shiller_df,
@@ -54,26 +65,11 @@ def update_guardrail_dynamic_labels(gr_params: dict, is_guidance: bool, cashflow
     """
     Updates the dynamic labels on the upper and lower guardrail inputs that show the corresponding portfolio values.
     """
-    # Ensure Shiller data is available
-    shiller_df = st.session_state.get('shiller_df')
-    if shiller_df is None:
-        shiller_df = utils.load_shiller_data()
-        st.session_state['shiller_df'] = shiller_df
+    shiller_df = utils.get_cached_shiller_df(st.session_state)
+    num_months, analysis_end_date_used = _resolve_analysis_horizon(
+        shiller_df, gr_params, is_guidance, "guardrail labels"
+    )
 
-    # Determine horizon length in months based on duration input
-    if is_guidance:
-        latest_shiller_date = pd.to_datetime(shiller_df["Date"].max())
-        asof_for_gr = latest_shiller_date if latest_shiller_date <= pd.to_datetime(
-            datetime.date.today()) else pd.to_datetime(datetime.date.today())
-        num_months = gr_params['duration_months']
-        if num_months <= 0:
-            num_months = 360
-        analysis_end_date_used = asof_for_gr
-    else:
-        num_months = gr_params['duration_months']
-        if num_months <= 0:
-            raise ValueError("Invalid retirement duration to compute guardrail labels.")
-        analysis_end_date_used = gr_params['start_date']
     # First-period spending used to determine portfolio values that align with the guardrails
     first_month_spending = float(gr_params.get('initial_spending', 0.0))
 
@@ -172,17 +168,6 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         st.info("No simulation results to display.")
         return
 
-    # Helper function for currency formatting in hover template
-    def _format_currency_for_hover(value):
-        if pd.isna(value):
-            return "N/A"
-        # Format the absolute value with thousands separator and two decimal places
-        formatted_abs_value = f"{abs(value):,.0f}"
-        if value < 0:
-            return f"-${formatted_abs_value}"
-        else:
-            return f"${formatted_abs_value}"
-
     show_guardrail_hits = st.checkbox(
         "Show guardrail hit markers",
         value=True,
@@ -207,8 +192,8 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         initial_total_spending = float(results_df['Total_Spending'].iloc[0])
         total_spending_diff = results_df['Total_Spending'].astype(float) - initial_total_spending
 
-        # Apply the new formatting function to create a pre-formatted string for customdata
-        formatted_total_spending_diff = total_spending_diff.apply(_format_currency_for_hover)
+        # Apply the formatting function to create a pre-formatted string for customdata
+        formatted_total_spending_diff = total_spending_diff.apply(_fmt_currency)
 
         percent_denominator = initial_total_spending if initial_total_spending != 0 else np.nan
         total_spending_pct_diff = total_spending_diff / percent_denominator
@@ -443,11 +428,6 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
     min_streak = _longest_run(spending_series, min_spending) if not spending_series.empty else 0
     max_streak = _longest_run(spending_series, max_spending) if not spending_series.empty else 0
 
-    def _fmt_currency(value):
-        if value is None or not np.isfinite(value):
-            return "N/A"
-        return f"${value:,.0f}"
-
     def _fmt_pct_diff(new_value, baseline):
         if new_value is None or baseline in (None, 0):
             return "N/A"
@@ -498,8 +478,7 @@ def render_guidance_results(snap: dict):
     """Summarize the guardrail guidance snapshot as advisor-friendly bullet points."""
 
     def fmt_money(x):
-        # Escape the dollar sign so Streamlit Markdown doesn't interpret $...$ as LaTeX math
-        return f"\\${x:,.0f}" if (x is not None and (isinstance(x, (int, float)) and not np.isinf(x))) else "N/A"
+        return _fmt_currency(x, escape_for_markdown=True)
 
     def fmt_pct(p):
         return f"{p * 100:+.0f}%" if p is not None else "N/A"
@@ -560,7 +539,7 @@ def render_guidance_results(snap: dict):
             "Metric": "Current Monthly Cashflow",
             "Monthly": fmt_money(cashflow_month0),
             "Annual": fmt_money(annual_cashflow_total),
-            "Notes": "Cash inflows/outflows at month 0",
+            "Notes": "First month and total for first year",
         },
     ]
 
