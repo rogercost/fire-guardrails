@@ -22,13 +22,6 @@ This app is meant for theoretical experimentation purposes only. It is not finan
 
 * This project uses Robert Shiller's historical market dataset found here: https://shillerdata.com/
 
-## Reporting Bugs and Issues
-
-This is a work in progress. Feel free to report issues or bugs, or suggest new features, 
-[here](https://github.com/rogercost/fire-guardrails/issues).
-
-Contributions are also welcome, please feel free to open a pull request.
-
 ## Quick Start - Streamlit App
 
 You can run the Streamlit app locally on your PC. 
@@ -38,6 +31,17 @@ Ensure `uv` is installed: https://docs.astral.sh/uv/getting-started/installation
 Then start the app:
 ```
 uv run streamlit run streamlit_app.py
+```
+
+## Reporting Bugs and Issues
+
+This is a work in progress. Feel free to report issues or bugs, or suggest new features, 
+[here](https://github.com/rogercost/fire-guardrails/issues).
+
+Contributions are also welcome, please feel free to open a pull request. Be sure to run the tests for any changes:
+
+```commandline
+uv run python -m pytest test
 ```
 
 It will redirect you to http://localhost:8501/ where you can interact with the UI.
