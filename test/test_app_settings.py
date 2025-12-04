@@ -170,28 +170,29 @@ class TestSettings:
         end_date = default_settings.retirement_end_date()
         assert end_date == datetime.date(2049, 12, 1)
 
-    def test_retirement_end_date_zero_months(self):
-        settings = Settings(
-            mode="Simulation Mode",
-            start_date=datetime.date(2020, 1, 1),
-            retirement_duration_months=0,
-            analysis_start_date=datetime.date(1871, 1, 1),
-            initial_value=1_000_000.0,
-            stock_pct=0.75,
-            target_success_rate=0.90,
-            initial_monthly_spending=4000.0,
-            initial_spending_overridden=False,
-            upper_guardrail_success=1.0,
-            lower_guardrail_success=0.75,
-            upper_adjustment_fraction=1.0,
-            lower_adjustment_fraction=0.1,
-            adjustment_threshold=0.05,
-            adjustment_frequency="Monthly",
-            spending_cap_option="Unlimited",
-            spending_floor_option="Unlimited",
-            cashflows=[],
-        )
-        assert settings.retirement_end_date() is None
+    def test_retirement_end_date_zero_months_raises(self):
+        with pytest.raises(ValueError) as exc_info:
+            Settings(
+                mode="Simulation Mode",
+                start_date=datetime.date(2020, 1, 1),
+                retirement_duration_months=0,
+                analysis_start_date=datetime.date(1871, 1, 1),
+                initial_value=1_000_000.0,
+                stock_pct=0.75,
+                target_success_rate=0.90,
+                initial_monthly_spending=4000.0,
+                initial_spending_overridden=False,
+                upper_guardrail_success=1.0,
+                lower_guardrail_success=0.75,
+                upper_adjustment_fraction=1.0,
+                lower_adjustment_fraction=0.1,
+                adjustment_threshold=0.05,
+                adjustment_frequency="Monthly",
+                spending_cap_option="Unlimited",
+                spending_floor_option="Unlimited",
+                cashflows=[],
+            )
+        assert "Retirement duration must be positive" in str(exc_info.value)
 
     def test_cashflows_preserved_in_roundtrip(self):
         cashflows = [
@@ -292,3 +293,132 @@ class TestRelativeOptionToMultiplier:
     def test_invalid_string_returns_none(self):
         from app_settings import _relative_option_to_multiplier
         assert _relative_option_to_multiplier("invalid") is None
+
+
+class TestSettingsValidation:
+    """Tests for Settings validation in __post_init__."""
+
+    def _make_settings(self, **overrides):
+        """Helper to create Settings with defaults, overriding specific fields."""
+        defaults = {
+            "mode": "Simulation Mode",
+            "start_date": datetime.date(2020, 1, 1),
+            "retirement_duration_months": 360,
+            "analysis_start_date": datetime.date(1871, 1, 1),
+            "initial_value": 1_000_000.0,
+            "stock_pct": 0.75,
+            "target_success_rate": 0.90,
+            "initial_monthly_spending": 4000.0,
+            "initial_spending_overridden": False,
+            "upper_guardrail_success": 1.0,
+            "lower_guardrail_success": 0.75,
+            "upper_adjustment_fraction": 1.0,
+            "lower_adjustment_fraction": 0.1,
+            "adjustment_threshold": 0.05,
+            "adjustment_frequency": "Monthly",
+            "spending_cap_option": "Unlimited",
+            "spending_floor_option": "Unlimited",
+            "cashflows": [],
+        }
+        defaults.update(overrides)
+        return Settings(**defaults)
+
+    def test_negative_initial_value_raises(self):
+        with pytest.raises(ValueError) as exc_info:
+            self._make_settings(initial_value=-100000.0)
+        assert "Initial portfolio value must be positive" in str(exc_info.value)
+
+    def test_zero_initial_value_raises(self):
+        with pytest.raises(ValueError) as exc_info:
+            self._make_settings(initial_value=0.0)
+        assert "Initial portfolio value must be positive" in str(exc_info.value)
+
+    def test_negative_monthly_spending_raises(self):
+        with pytest.raises(ValueError) as exc_info:
+            self._make_settings(initial_monthly_spending=-1000.0)
+        assert "Initial monthly spending cannot be negative" in str(exc_info.value)
+
+    def test_zero_monthly_spending_allowed(self):
+        settings = self._make_settings(initial_monthly_spending=0.0)
+        assert settings.initial_monthly_spending == 0.0
+
+    def test_negative_retirement_duration_raises(self):
+        with pytest.raises(ValueError) as exc_info:
+            self._make_settings(retirement_duration_months=-12)
+        assert "Retirement duration must be positive" in str(exc_info.value)
+
+    def test_stock_pct_above_one_raises(self):
+        with pytest.raises(ValueError) as exc_info:
+            self._make_settings(stock_pct=1.5)
+        assert "Stock percentage must be between 0% and 100%" in str(exc_info.value)
+
+    def test_stock_pct_negative_raises(self):
+        with pytest.raises(ValueError) as exc_info:
+            self._make_settings(stock_pct=-0.1)
+        assert "Stock percentage must be between 0% and 100%" in str(exc_info.value)
+
+    def test_stock_pct_boundary_values_allowed(self):
+        settings_zero = self._make_settings(stock_pct=0.0)
+        assert settings_zero.stock_pct == 0.0
+        settings_one = self._make_settings(stock_pct=1.0)
+        assert settings_one.stock_pct == 1.0
+
+    def test_target_success_rate_above_one_raises(self):
+        with pytest.raises(ValueError) as exc_info:
+            self._make_settings(target_success_rate=1.1)
+        assert "Target success rate must be between 0% and 100%" in str(exc_info.value)
+
+    def test_analysis_start_after_retirement_start_raises(self):
+        with pytest.raises(ValueError) as exc_info:
+            self._make_settings(
+                start_date=datetime.date(2000, 1, 1),
+                analysis_start_date=datetime.date(2010, 1, 1),
+            )
+        assert "Historical analysis start date" in str(exc_info.value)
+        assert "cannot be after" in str(exc_info.value)
+
+    def test_analysis_start_equals_retirement_start_allowed(self):
+        settings = self._make_settings(
+            start_date=datetime.date(2000, 1, 1),
+            analysis_start_date=datetime.date(2000, 1, 1),
+        )
+        assert settings.start_date == settings.analysis_start_date
+
+
+class TestSettingsBase64ErrorHandling:
+    """Tests for user-friendly error messages from from_base64."""
+
+    def test_corrupted_base64_gives_friendly_error(self):
+        with pytest.raises(ValueError) as exc_info:
+            Settings.from_base64("!!!not-valid-base64!!!")
+        # May fail at base64 decode or gzip decompress depending on input
+        error_msg = str(exc_info.value).lower()
+        assert "corrupted" in error_msg or "invalid" in error_msg
+
+    def test_truncated_data_gives_friendly_error(self):
+        # Valid base64 but not valid gzip
+        with pytest.raises(ValueError) as exc_info:
+            Settings.from_base64("SGVsbG8gV29ybGQ")  # "Hello World" in base64
+        assert "could not be decompressed" in str(exc_info.value)
+
+    def test_invalid_json_gives_friendly_error(self):
+        import gzip
+        import base64
+        # Gzip some invalid JSON
+        invalid_json = b"not valid json {"
+        compressed = gzip.compress(invalid_json)
+        encoded = base64.urlsafe_b64encode(compressed).decode("utf-8").rstrip("=")
+        with pytest.raises(ValueError) as exc_info:
+            Settings.from_base64(encoded)
+        assert "invalid data" in str(exc_info.value)
+
+    def test_non_dict_json_gives_friendly_error(self):
+        import gzip
+        import base64
+        # Gzip a JSON array instead of object
+        array_json = b'[1, 2, 3]'
+        compressed = gzip.compress(array_json)
+        encoded = base64.urlsafe_b64encode(compressed).decode("utf-8").rstrip("=")
+        with pytest.raises(ValueError) as exc_info:
+            Settings.from_base64(encoded)
+        assert "format is invalid" in str(exc_info.value)

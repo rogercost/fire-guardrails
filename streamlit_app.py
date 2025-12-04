@@ -418,6 +418,14 @@ settings = Settings(
 
 st.session_state["settings"] = settings
 
+# Warn if guardrail success rates are in unexpected order
+if not (lower_guardrail_success <= target_success_rate <= upper_guardrail_success):
+    st.sidebar.warning(
+        "Guardrail success rates are in an unusual order. Typically: "
+        "Lower Guardrail \u2264 Target \u2264 Upper Guardrail. "
+        "Current values may produce unexpected behavior."
+    )
+
 encoded_config = settings.to_base64()
 st.session_state["_encoded_settings"] = encoded_config
 share_link_url = f"?config={encoded_config}"
