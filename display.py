@@ -172,6 +172,17 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         st.info("No simulation results to display.")
         return
 
+    # Helper function for currency formatting in hover template
+    def _format_currency_for_hover(value):
+        if pd.isna(value):
+            return "N/A"
+        # Format the absolute value with thousands separator and two decimal places
+        formatted_abs_value = f"{abs(value):,.2f}"
+        if value < 0:
+            return f"-${formatted_abs_value}"
+        else:
+            return f"${formatted_abs_value}"
+
     show_guardrail_hits = st.checkbox(
         "Show guardrail hit markers",
         value=True,
@@ -194,10 +205,14 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
     if 'Total_Income' in results_df.columns and not results_df.empty:
         initial_total_income = float(results_df['Total_Income'].iloc[0])
         total_income_diff = results_df['Total_Income'].astype(float) - initial_total_income
+        
+        # Apply the new formatting function to create a pre-formatted string for customdata
+        formatted_total_income_diff = total_income_diff.apply(_format_currency_for_hover)
+
         percent_denominator = initial_total_income if initial_total_income != 0 else np.nan
         total_income_pct_diff = total_income_diff / percent_denominator
         total_income_customdata = np.column_stack([
-            total_income_diff,
+            formatted_total_income_diff,  # Use the pre-formatted string here as customdata[0]
             total_income_pct_diff
         ])
 
@@ -283,7 +298,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
     if 'Total_Income' in results_df.columns:
         total_income_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.2f}'
         if total_income_customdata is not None:
-            total_income_hovertemplate += '<br>Difference: $%{customdata[0]:+,.2f}'
+            total_income_hovertemplate += '<br>Difference: %{customdata[0]}' # Use pre-formatted string directly
             if initial_total_income not in (None, 0):
                 total_income_hovertemplate += '<br>% Difference: %{customdata[1]:+.1%}'
         total_income_hovertemplate += '<extra></extra>'
