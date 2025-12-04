@@ -510,7 +510,7 @@ def render_guidance_results(snap: dict):
     st.subheader("Guidance Mode")
     st.markdown(
         "Use this mode to generate forward-looking guidance for a client who is retired today and in drawdown.\n\n"
-        "For more information, see the [official documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
+        "All dollar amounts shown are in real (constant) dollars, net of inflation. For more details, see the [documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
 
     # Notes for spending row shows spending rate
     spending_notes = (
