@@ -4,81 +4,77 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
-from typing import Optional
+from typing import Optional, Tuple
 import utils
 
 
-def update_iwr_dynamic_label(iwr_params: dict, is_guidance: bool, cashflows: list):
-    """
-    Updates the dynamic label on the target success rate input that shows the corresponding initial withdrawal rate.
-    """
-    # Ensure Shiller data is loaded or cached in session_state
-    shiller_df = st.session_state.get('shiller_df')
-    if shiller_df is None:
-        shiller_df = utils.load_shiller_data()
-        st.session_state['shiller_df'] = shiller_df
+def _fmt_currency(value, escape_for_markdown: bool = False) -> str:
+    """Format a currency value with optional Markdown escaping."""
+    if value is None or (isinstance(value, float) and (pd.isna(value) or not np.isfinite(value))):
+        return "N/A"
+    prefix = "\\$" if escape_for_markdown else "$"
+    if value < 0:
+        return f"-{prefix}{abs(value):,.0f}"
+    return f"{prefix}{value:,.0f}"
 
-    # Determine horizon length in months based on duration input
+
+def _resolve_analysis_horizon(shiller_df, params: dict, is_guidance: bool, context: str) -> Tuple[int, pd.Timestamp]:
+    """Compute num_months and analysis_end_date based on mode and params."""
     if is_guidance:
         latest_shiller_date = pd.to_datetime(shiller_df["Date"].max())
-        asof_for_iwr = latest_shiller_date if latest_shiller_date <= pd.to_datetime(
-            datetime.date.today()) else pd.to_datetime(datetime.date.today())
-        num_months = iwr_params['duration_months']
+        today = pd.to_datetime(datetime.date.today())
+        analysis_end_date = latest_shiller_date if latest_shiller_date <= today else today
+        num_months = params['duration_months']
         if num_months <= 0:
             num_months = 360
-        analysis_end_date_used = asof_for_iwr
     else:
-        num_months = iwr_params['duration_months']
+        num_months = params['duration_months']
         if num_months <= 0:
-            raise ValueError("Invalid retirement duration to compute initial WR.")
-        analysis_end_date_used = iwr_params['start_date']
+            raise ValueError(f"Invalid retirement duration to compute {context}.")
+        analysis_end_date = params['start_date']
+    return num_months, analysis_end_date
 
-    res = utils.get_wr_for_fixed_success_rate(
+
+def update_isr_dynamic_label(isr_params: dict, is_guidance: bool, cashflows: list):
+    """
+    Updates the dynamic label on the target success rate input that shows the corresponding initial spending rate.
+    """
+    shiller_df = utils.get_cached_shiller_df(st.session_state)
+    num_months, analysis_end_date_used = _resolve_analysis_horizon(
+        shiller_df, isr_params, is_guidance, "initial spending rate"
+    )
+
+    res = utils.get_spending_rate_for_fixed_success_rate(
         df=shiller_df,
-        desired_success_rate=iwr_params['desired_success_rate'],
+        desired_success_rate=isr_params['desired_success_rate'],
         num_months=num_months,
-        analysis_start_date=iwr_params['analysis_start_date'],
+        analysis_start_date=isr_params['analysis_start_date'],
         analysis_end_date=analysis_end_date_used,  # Use 'today' in Guidance Mode to match label logic
-        initial_value=iwr_params['initial_value'],
-        stock_pct=iwr_params['stock_pct'],
+        initial_value=isr_params['initial_value'],
+        stock_pct=isr_params['stock_pct'],
         tolerance=0.001,
         max_iterations=50,
         verbose=False,
         cashflows=cashflows,
     )
-    st.session_state['iwr_value'] = float(res['withdrawal_rate']) if res['withdrawal_rate'] is not None else None
-    st.session_state['iwr_params'] = iwr_params
+    st.session_state['isr_value'] = float(res['spending_rate']) if res['spending_rate'] is not None else None
+    st.session_state['isr_params'] = isr_params
 
 
 def update_guardrail_dynamic_labels(gr_params: dict, is_guidance: bool, cashflows: list):
     """
     Updates the dynamic labels on the upper and lower guardrail inputs that show the corresponding portfolio values.
     """
-    # Ensure Shiller data is available
-    shiller_df = st.session_state.get('shiller_df')
-    if shiller_df is None:
-        shiller_df = utils.load_shiller_data()
-        st.session_state['shiller_df'] = shiller_df
+    shiller_df = utils.get_cached_shiller_df(st.session_state)
+    num_months, analysis_end_date_used = _resolve_analysis_horizon(
+        shiller_df, gr_params, is_guidance, "guardrail labels"
+    )
 
-    # Determine horizon length in months based on duration input
-    if is_guidance:
-        latest_shiller_date = pd.to_datetime(shiller_df["Date"].max())
-        asof_for_gr = latest_shiller_date if latest_shiller_date <= pd.to_datetime(
-            datetime.date.today()) else pd.to_datetime(datetime.date.today())
-        num_months = gr_params['duration_months']
-        if num_months <= 0:
-            num_months = 360
-        analysis_end_date_used = asof_for_gr
-    else:
-        num_months = gr_params['duration_months']
-        if num_months <= 0:
-            raise ValueError("Invalid retirement duration to compute guardrail labels.")
-        analysis_end_date_used = gr_params['start_date']
     # First-period spending used to determine portfolio values that align with the guardrails
     first_month_spending = float(gr_params.get('initial_spending', 0.0))
 
-    # Compute WRs at start of retirement using retirement start date as analysis end date
-    upper_res = utils.get_wr_for_fixed_success_rate(
+    # Compute spending rates at start of retirement using retirement start date as analysis end date
+    upper_res = utils.get_spending_rate_for_fixed_success_rate(
         df=shiller_df,
         desired_success_rate=gr_params['upper_sr'],
         num_months=num_months,
@@ -92,7 +88,7 @@ def update_guardrail_dynamic_labels(gr_params: dict, is_guidance: bool, cashflow
         cashflows=cashflows,
     )
 
-    lower_res = utils.get_wr_for_fixed_success_rate(
+    lower_res = utils.get_spending_rate_for_fixed_success_rate(
         df=shiller_df,
         desired_success_rate=gr_params['lower_sr'],
         num_months=num_months,
@@ -106,11 +102,11 @@ def update_guardrail_dynamic_labels(gr_params: dict, is_guidance: bool, cashflow
         cashflows=cashflows,
     )
 
-    upper_wr = float(upper_res['withdrawal_rate']) if upper_res['withdrawal_rate'] is not None else None
-    lower_wr = float(lower_res['withdrawal_rate']) if lower_res['withdrawal_rate'] is not None else None
+    upper_sr = float(upper_res['spending_rate']) if upper_res['spending_rate'] is not None else None
+    lower_sr = float(lower_res['spending_rate']) if lower_res['spending_rate'] is not None else None
 
-    upper_pv = first_month_spending / upper_wr * 12 if (upper_wr is not None and upper_wr > 0) else None
-    lower_pv = first_month_spending / lower_wr * 12 if (lower_wr is not None and lower_wr > 0) else None
+    upper_pv = first_month_spending / upper_sr * 12 if (upper_sr is not None and upper_sr > 0) else None
+    lower_pv = first_month_spending / lower_sr * 12 if (lower_sr is not None and lower_sr > 0) else None
 
     st.session_state[
         'upper_label_suffix'] = f" (Initial PV: ${upper_pv:,.0f})" if upper_pv is not None else " (Initial PV: N/A)"
@@ -172,17 +168,6 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         st.info("No simulation results to display.")
         return
 
-    # Helper function for currency formatting in hover template
-    def _format_currency_for_hover(value):
-        if pd.isna(value):
-            return "N/A"
-        # Format the absolute value with thousands separator and two decimal places
-        formatted_abs_value = f"{abs(value):,.0f}"
-        if value < 0:
-            return f"-${formatted_abs_value}"
-        else:
-            return f"${formatted_abs_value}"
-
     show_guardrail_hits = st.checkbox(
         "Show guardrail hit markers",
         value=True,
@@ -201,28 +186,29 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
         subplot_titles=("Portfolio Value vs Guardrails", "Withdrawals Over Time")
     )
 
-    initial_total_income = None
-    if 'Total_Income' in results_df.columns and not results_df.empty:
-        initial_total_income = float(results_df['Total_Income'].iloc[0])
-        total_income_diff = results_df['Total_Income'].astype(float) - initial_total_income
-        
-        # Apply the new formatting function to create a pre-formatted string for customdata
-        formatted_total_income_diff = total_income_diff.apply(_format_currency_for_hover)
+    initial_total_spending = None
+    total_spending_customdata = None
+    if 'Total_Spending' in results_df.columns and not results_df.empty:
+        initial_total_spending = float(results_df['Total_Spending'].iloc[0])
+        total_spending_diff = results_df['Total_Spending'].astype(float) - initial_total_spending
 
-        percent_denominator = initial_total_income if initial_total_income != 0 else np.nan
-        total_income_pct_diff = total_income_diff / percent_denominator
-        total_income_customdata = np.column_stack([
-            formatted_total_income_diff,  # Use the pre-formatted string here as customdata[0]
-            total_income_pct_diff
+        # Apply the formatting function to create a pre-formatted string for customdata
+        formatted_total_spending_diff = total_spending_diff.apply(_fmt_currency)
+
+        percent_denominator = initial_total_spending if initial_total_spending != 0 else np.nan
+        total_spending_pct_diff = total_spending_diff / percent_denominator
+        total_spending_customdata = np.column_stack([
+            formatted_total_spending_diff,  # Use the pre-formatted string here as customdata[0]
+            total_spending_pct_diff
         ])
 
-    if 'Fixed_WR_Value' in results_df.columns:
+    if 'Fixed_SR_Value' in results_df.columns:
         fig.add_trace(
             go.Scatter(
                 x=results_df['Date'],
-                y=results_df['Fixed_WR_Value'],
+                y=results_df['Fixed_SR_Value'],
                 mode='lines',
-                name='Value w/Fixed WR',
+                name='Value w/Fixed SR',
                 line=dict(color='#7f7f7f'),
                 opacity=0.6,
                 hovertemplate='<b>%{fullData.name}</b>: $%{y:,.0f}<extra></extra>'
@@ -295,22 +281,22 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             row=2,
             col=1
         )
-    if 'Total_Income' in results_df.columns:
-        total_income_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.0f}'
-        if total_income_customdata is not None:
-            total_income_hovertemplate += '<br>Difference: %{customdata[0]}' # Use pre-formatted string directly
-            if initial_total_income not in (None, 0):
-                total_income_hovertemplate += '<br>% Difference: %{customdata[1]:+.1%}'
-        total_income_hovertemplate += '<extra></extra>'
+    if 'Total_Spending' in results_df.columns:
+        total_spending_hovertemplate = '<b>%{fullData.name}</b>: $%{y:,.0f}'
+        if total_spending_customdata is not None:
+            total_spending_hovertemplate += '<br>Difference: %{customdata[0]}'  # Use pre-formatted string directly
+            if initial_total_spending not in (None, 0):
+                total_spending_hovertemplate += '<br>% Difference: %{customdata[1]:+.1%}'
+        total_spending_hovertemplate += '<extra></extra>'
         fig.add_trace(
             go.Scatter(
                 x=results_df['Date'],
-                y=results_df['Total_Income'],
+                y=results_df['Total_Spending'],
                 mode='lines',
-                name='Total Income',
+                name='Total Spending',
                 line=dict(color='#bcbd22'),
-                customdata=total_income_customdata,
-                hovertemplate=total_income_hovertemplate
+                customdata=total_spending_customdata,
+                hovertemplate=total_spending_hovertemplate
             ),
             row=2,
             col=1
@@ -318,7 +304,7 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
     fig.add_trace(
         go.Scatter(
             x=results_df['Date'],
-            y=results_df['Fixed_WR_Withdrawal'] if 'Fixed_WR_Withdrawal' in results_df.columns else [init_withdrawal] * len(results_df),
+            y=results_df['Fixed_SR_Withdrawal'] if 'Fixed_SR_Withdrawal' in results_df.columns else [init_withdrawal] * len(results_df),
             mode='lines',
             name='Initial Withdrawal',
             line=dict(color='#7f7f7f', dash='dash'),
@@ -409,24 +395,24 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
 
     st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': False})
 
-    total_fixed = float(results_df['Fixed_WR_Withdrawal'].sum()) if 'Fixed_WR_Withdrawal' in results_df.columns else float(init_withdrawal) * len(results_df)
+    total_fixed = float(results_df['Fixed_SR_Withdrawal'].sum()) if 'Fixed_SR_Withdrawal' in results_df.columns else float(init_withdrawal) * len(results_df)
     total_guardrails = float(results_df['Withdrawal'].sum())
     total_cashflow = float(results_df['Net_Cashflow'].sum()) if 'Net_Cashflow' in results_df.columns else 0.0
-    total_income_guardrails = float(results_df['Total_Income'].sum()) if 'Total_Income' in results_df.columns else total_guardrails + total_cashflow
-    total_income_fixed = float(results_df['Fixed_WR_Total_Income'].sum()) if 'Fixed_WR_Total_Income' in results_df.columns else total_fixed + total_cashflow
+    total_spending_guardrails = float(results_df['Total_Spending'].sum()) if 'Total_Spending' in results_df.columns else total_guardrails + total_cashflow
+    total_spending_fixed = float(results_df['Fixed_SR_Total_Spending'].sum()) if 'Fixed_SR_Total_Spending' in results_df.columns else total_fixed + total_cashflow
     withdrawal_diff_ratio = (total_guardrails - total_fixed) / total_fixed if total_fixed else None
-    income_diff_ratio = (total_income_guardrails - total_income_fixed) / total_income_fixed if total_income_fixed else None
+    spending_diff_ratio = (total_spending_guardrails - total_spending_fixed) / total_spending_fixed if total_spending_fixed else None
 
-    if 'Total_Income' in results_df.columns:
-        income_series = results_df['Total_Income'].astype(float)
+    if 'Total_Spending' in results_df.columns:
+        spending_series = results_df['Total_Spending'].astype(float)
     else:
-        income_series = results_df['Withdrawal'].astype(float) if 'Withdrawal' in results_df.columns else pd.Series(dtype=float)
-        if 'Net_Cashflow' in results_df.columns and not income_series.empty:
-            income_series = income_series + results_df['Net_Cashflow'].astype(float)
+        spending_series = results_df['Withdrawal'].astype(float) if 'Withdrawal' in results_df.columns else pd.Series(dtype=float)
+        if 'Net_Cashflow' in results_df.columns and not spending_series.empty:
+            spending_series = spending_series + results_df['Net_Cashflow'].astype(float)
 
-    start_income = float(income_series.iloc[0]) if not income_series.empty else None
-    min_income = float(income_series.min()) if not income_series.empty else None
-    max_income = float(income_series.max()) if not income_series.empty else None
+    start_spending = float(spending_series.iloc[0]) if not spending_series.empty else None
+    min_spending = float(spending_series.min()) if not spending_series.empty else None
+    max_spending = float(spending_series.max()) if not spending_series.empty else None
 
     def _longest_run(values, target):
         longest = 0
@@ -439,13 +425,8 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
                 current = 0
         return longest
 
-    min_streak = _longest_run(income_series, min_income) if not income_series.empty else 0
-    max_streak = _longest_run(income_series, max_income) if not income_series.empty else 0
-
-    def _fmt_currency(value):
-        if value is None or not np.isfinite(value):
-            return "N/A"
-        return f"${value:,.0f}"
+    min_streak = _longest_run(spending_series, min_spending) if not spending_series.empty else 0
+    max_streak = _longest_run(spending_series, max_spending) if not spending_series.empty else 0
 
     def _fmt_pct_diff(new_value, baseline):
         if new_value is None or baseline in (None, 0):
@@ -460,50 +441,53 @@ def render_simulation_results(results_df: pd.DataFrame) -> None:
             "% Diff": _fmt_pct_diff(total_guardrails, total_fixed) if withdrawal_diff_ratio is not None else "N/A",
         },
         {
-            "Metric": "Total Income",
-            "Fixed": _fmt_currency(total_income_fixed),
-            "Guardrails": _fmt_currency(total_income_guardrails),
-            "% Diff": _fmt_pct_diff(total_income_guardrails, total_income_fixed) if income_diff_ratio is not None else "N/A",
+            "Metric": "Total Spending",
+            "Fixed": _fmt_currency(total_spending_fixed),
+            "Guardrails": _fmt_currency(total_spending_guardrails),
+            "% Diff": _fmt_pct_diff(total_spending_guardrails, total_spending_fixed) if spending_diff_ratio is not None else "N/A",
         },
     ]
 
     st.table(pd.DataFrame(summary_rows).set_index("Metric"))
 
-    income_rows = [
+    spending_rows = [
         {
-            "Metric": "Start Income",
-            "Monthly": _fmt_currency(start_income),
+            "Metric": "Start Spending",
+            "Monthly": _fmt_currency(start_spending),
             "% Diff": "—",
             "Duration (months)": "—",
         },
         {
-            "Metric": "Min Income",
-            "Monthly": _fmt_currency(min_income),
-            "% Diff": _fmt_pct_diff(min_income, start_income),
+            "Metric": "Min Spending",
+            "Monthly": _fmt_currency(min_spending),
+            "% Diff": _fmt_pct_diff(min_spending, start_spending),
             "Duration (months)": f"{min_streak}" if min_streak else "—",
         },
         {
-            "Metric": "Max Income",
-            "Monthly": _fmt_currency(max_income),
-            "% Diff": _fmt_pct_diff(max_income, start_income),
+            "Metric": "Max Spending",
+            "Monthly": _fmt_currency(max_spending),
+            "% Diff": _fmt_pct_diff(max_spending, start_spending),
             "Duration (months)": f"{max_streak}" if max_streak else "—",
         },
     ]
 
-    st.table(pd.DataFrame(income_rows).set_index("Metric"))
+    st.table(pd.DataFrame(spending_rows).set_index("Metric"))
 
 
 def render_guidance_results(snap: dict):
     """Summarize the guardrail guidance snapshot as advisor-friendly bullet points."""
 
     def fmt_money(x):
-        # Escape the dollar sign so Streamlit Markdown doesn't interpret $...$ as LaTeX math
-        return f"\\${x:,.0f}" if (x is not None and (isinstance(x, (int, float)) and not np.isinf(x))) else "N/A"
+        return _fmt_currency(x, escape_for_markdown=True)
 
     def fmt_pct(p):
         return f"{p * 100:+.0f}%" if p is not None else "N/A"
 
-    start_wr = st.session_state.get("iwr_value", snap.get("target_withdrawal_rate"))
+    # Get spending rate (rate at which spending is calculated from portfolio)
+    start_sr = st.session_state.get("isr_value", snap.get("target_spending_rate"))
+    # Get actual withdrawal rate (true portfolio withdrawal rate after cashflows)
+    target_wr = snap.get("target_withdrawal_rate")
+
     start_month = snap.get("target_monthly_spending")
     start_year = (start_month * 12.0) if start_month is not None else None
     start_net_withdrawal = snap.get("target_monthly_withdrawal")
@@ -523,19 +507,19 @@ def render_guidance_results(snap: dict):
     cashflow_month0 = snap.get("current_cashflow")
     annual_cashflow_total = snap.get("annual_cashflow_total")
 
-    def fmt_month(ts):
-        if ts is None or pd.isna(ts):
-            return "N/A"
-        timestamp = pd.to_datetime(ts)
-        return timestamp.strftime("%B %Y")
-
     st.subheader("Guidance Mode")
     st.markdown(
         "Use this mode to generate forward-looking guidance for a client who is retired today and in drawdown.\n\n"
         "For more information, see the [official documentation](https://github.com/rogercost/fire-guardrails/blob/main/README.md).")
 
+    # Notes for spending row shows spending rate
     spending_notes = (
-        f"{start_wr * 100:.2f}% withdrawal rate" if start_wr is not None else "Based on Initial Portfolio Value"
+        f"{start_sr * 100:.2f}% spending rate" if start_sr is not None else "Based on Initial Portfolio Value"
+    )
+
+    # Notes for withdrawal row shows actual withdrawal rate
+    withdrawal_notes = (
+        f"{target_wr * 100:.2f}% withdrawal rate" if target_wr is not None else "Net amount after monthly cashflows"
     )
 
     summary_rows = [
@@ -549,13 +533,13 @@ def render_guidance_results(snap: dict):
             "Metric": "Portfolio Withdrawal After Cashflows",
             "Monthly": fmt_money(start_net_withdrawal),
             "Annual": fmt_money(start_annual_withdrawal),
-            "Notes": "Net amount after monthly cashflows",
+            "Notes": withdrawal_notes,
         },
         {
             "Metric": "Current Monthly Cashflow",
             "Monthly": fmt_money(cashflow_month0),
             "Annual": fmt_money(annual_cashflow_total),
-            "Notes": "Cash inflows/outflows at month 0",
+            "Notes": "First month and total for first year",
         },
     ]
 

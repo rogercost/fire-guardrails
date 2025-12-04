@@ -88,6 +88,7 @@ class Settings:
     cashflows: List[CashflowSetting] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        # Type coercion
         self.mode = str(self.mode)
         self.retirement_duration_months = int(self.retirement_duration_months)
         self.initial_value = float(self.initial_value)
@@ -103,6 +104,43 @@ class Settings:
         self.adjustment_frequency = str(self.adjustment_frequency)
         self.spending_cap_option = str(self.spending_cap_option)
         self.spending_floor_option = str(self.spending_floor_option)
+
+        # Validation
+        if self.initial_value <= 0:
+            raise ValueError(
+                f"Initial portfolio value must be positive, got {self.initial_value:,.0f}"
+            )
+        if self.initial_monthly_spending < 0:
+            raise ValueError(
+                f"Initial monthly spending cannot be negative, got {self.initial_monthly_spending:,.0f}"
+            )
+        if self.retirement_duration_months <= 0:
+            raise ValueError(
+                f"Retirement duration must be positive, got {self.retirement_duration_months} months"
+            )
+        if not (0.0 <= self.stock_pct <= 1.0):
+            raise ValueError(
+                f"Stock percentage must be between 0% and 100%, got {self.stock_pct * 100:.0f}%"
+            )
+        if not (0.0 <= self.target_success_rate <= 1.0):
+            raise ValueError(
+                f"Target success rate must be between 0% and 100%, got {self.target_success_rate * 100:.0f}%"
+            )
+        if not (0.0 <= self.upper_guardrail_success <= 1.0):
+            raise ValueError(
+                f"Upper guardrail success rate must be between 0% and 100%, got {self.upper_guardrail_success * 100:.0f}%"
+            )
+        if not (0.0 <= self.lower_guardrail_success <= 1.0):
+            raise ValueError(
+                f"Lower guardrail success rate must be between 0% and 100%, got {self.lower_guardrail_success * 100:.0f}%"
+            )
+        if self.analysis_start_date > self.start_date:
+            raise ValueError(
+                f"Historical analysis start date ({self.analysis_start_date}) cannot be after "
+                f"retirement start date ({self.start_date})"
+            )
+
+        # Clean cashflows
         cleaned: List[CashflowSetting] = []
         for flow in self.cashflows:
             if isinstance(flow, CashflowSetting):
@@ -220,11 +258,32 @@ class Settings:
     @classmethod
     def from_base64(cls, payload: str) -> "Settings":
         padding = "=" * (-len(payload) % 4)
-        decoded = base64.urlsafe_b64decode((payload + padding).encode("utf-8"))
-        decompressed = gzip.decompress(decoded)
-        data = json.loads(decompressed.decode("utf-8"))
+        try:
+            decoded = base64.urlsafe_b64decode((payload + padding).encode("utf-8"))
+        except Exception:
+            raise ValueError(
+                "The shared configuration link is corrupted or invalid. "
+                "Please request a new link."
+            )
+        try:
+            decompressed = gzip.decompress(decoded)
+        except Exception:
+            raise ValueError(
+                "The shared configuration data could not be decompressed. "
+                "The link may be incomplete or corrupted."
+            )
+        try:
+            data = json.loads(decompressed.decode("utf-8"))
+        except Exception:
+            raise ValueError(
+                "The shared configuration contains invalid data. "
+                "Please request a new link."
+            )
         if not isinstance(data, dict):
-            raise ValueError("Decoded configuration must be a JSON object.")
+            raise ValueError(
+                "The shared configuration format is invalid. "
+                "Expected a configuration object."
+            )
         return cls.from_dict(data)
 
     def apply_to_session_state(self, session_state: Any) -> None:
@@ -247,7 +306,8 @@ class Settings:
         session_state["spending_floor_option"] = self.spending_floor_option
         session_state["cashflows"] = [flow.to_serializable() for flow in self.cashflows]
 
-    def to_iwr_params(self) -> Dict[str, Any]:
+    def to_isr_params(self) -> Dict[str, Any]:
+        """Return parameters for computing the initial spending rate."""
         return {
             "start_date": self.start_date,
             "duration_months": int(self.retirement_duration_months),

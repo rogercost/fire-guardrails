@@ -137,9 +137,9 @@ controls.sync_cashflows_from_widgets()
 
 sanitized_cashflows = controls.sanitize_cashflows(st.session_state.get("cashflows"))
 
-# Compute Initial Withdrawal Rate (IWR) to show in the Target Success Rate label.
+# Compute Initial Spending Rate (ISR) to show in the Target Success Rate label.
 # We recompute only when relevant inputs change to avoid unnecessary calls.
-iwr_params = {
+isr_params = {
     'start_date': pd.to_datetime(start_date),
     'duration_months': int(retirement_duration_months),
     'analysis_start_date': pd.to_datetime(analysis_start_date),
@@ -149,33 +149,33 @@ iwr_params = {
     'desired_success_rate': float(st.session_state.get('target_success_rate', 0.90)),
     'cashflows': controls.cashflows_to_tuple(sanitized_cashflows),
 }
-iwr_label_suffix = ""
+isr_label_suffix = ""
 
 try:
-    if 'iwr_params' not in st.session_state or st.session_state['iwr_params'] != iwr_params:
-        display.update_iwr_dynamic_label(iwr_params=iwr_params, is_guidance=is_guidance, cashflows=sanitized_cashflows)
-    iwr = st.session_state.get('iwr_value')
-    if iwr is not None:
-        iwr_label_suffix = f" (Initial WR: {iwr*100:.2f}%)"
-        auto_initial_spending = round(float(initial_value) * float(iwr) / 12.0)
+    if 'isr_params' not in st.session_state or st.session_state['isr_params'] != isr_params:
+        display.update_isr_dynamic_label(isr_params=isr_params, is_guidance=is_guidance, cashflows=sanitized_cashflows)
+    isr = st.session_state.get('isr_value')
+    if isr is not None:
+        isr_label_suffix = f" (Initial SR: {isr*100:.2f}%)"
+        auto_initial_spending = round(float(initial_value) * float(isr) / 12.0)
     else:
-        iwr_label_suffix = " (Initial WR: N/A)"
+        isr_label_suffix = " (Initial SR: N/A)"
         auto_initial_spending = None
 
 except Exception as e:
     print(e)
-    iwr_label_suffix = " (Initial WR: N/A)"
+    isr_label_suffix = " (Initial SR: N/A)"
     auto_initial_spending = None
 
-target_success_label = f"Target Success Rate{iwr_label_suffix}"
+target_success_label = f"Target Success Rate{isr_label_suffix}"
 target_success_rate = st.sidebar.slider(
     target_success_label,
     value=st.session_state.get("target_success_rate", 0.90),
     min_value=0.0,
     max_value=1.0,
     step=0.01,
-    help="Desired probability of success that will be used to select an initial withdrawal rate.\n\nThe initial "
-         "withdrawal rate will be the rate at which fixed withdrawals over all periods of time with length = the "
+    help="Desired probability of success that will be used to select an initial spending rate.\n\nThe initial "
+         "spending rate will be the rate at which fixed spending over all periods of time with length = the "
          "configured retirement period length, between the Historical Analysis Start Date and the Retirement Start "
          "Date, end with >0 values this percent of the time.\n\nSetting this higher, e.g. 0.80-0.99, is more conservative: "
          "lower initial spending, lower chance of adjustment; setting this lower is more aggressive, 0.75-0.60 provides higher "
@@ -224,7 +224,7 @@ initial_monthly_spending = st.sidebar.number_input(
     step=10.0,
     format="%.0f",
     help="The initial monthly spending level for the retirement simulation, which will be used until a guardrail is hit.\n\n"
-         "Automatically updates as you change the Target Withdrawal Rate, but can be set to a custom value if desired.\n\n",
+         "Automatically updates as you change the Target Spending Rate, but can be set to a custom value if desired.\n\n",
     key="initial_monthly_spending",
     on_change=_mark_initial_spending_overridden,
     label_visibility="collapsed",
@@ -242,7 +242,7 @@ try:
         'stock_pct': float(stock_pct),
         'upper_sr': float(st.session_state.get("upper_guardrail_success", 1.00)),
         'lower_sr': float(st.session_state.get("lower_guardrail_success", 0.75)),
-        'iwr': float(st.session_state.get('iwr_value')) if st.session_state.get('iwr_value') is not None else None,
+        'isr': float(st.session_state.get('isr_value')) if st.session_state.get('isr_value') is not None else None,
         'initial_spending': float(st.session_state.get("initial_monthly_spending", 0.0)),
         'cashflows': controls.cashflows_to_tuple(sanitized_cashflows),
     }
@@ -274,8 +274,8 @@ upper_guardrail_success = st.sidebar.slider(
     min_value=0.0,
     max_value=1.0,
     step=0.01,
-    help="The withdrawal rate used to calculate the upper guardrail portfolio value.\n\nThis is the value where the "
-         "current withdrawal amount, if held constant, will succeed this frequently or more, for all periods with "
+    help="The spending rate used to calculate the upper guardrail portfolio value.\n\nThis is the value where the "
+         "current spending amount, if held constant, will succeed this frequently or more, for all periods with "
          "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
          "simulation date.\n\nSetting this higher is more conservative, and will cause you to wait longer to increase "
          "your spending when markets are up.",
@@ -291,8 +291,8 @@ lower_guardrail_success = st.sidebar.slider(
     min_value=0.0,
     max_value=1.0,
     step=0.01,
-    help="The withdrawal rate used to calculate the lower guardrail portfolio value.\n\nThis is the value where the "
-         "current withdrawal amount, if held constant, will succeed this frequently or less, for all periods with "
+    help="The spending rate used to calculate the lower guardrail portfolio value.\n\nThis is the value where the "
+         "current spending amount, if held constant, will succeed this frequently or less, for all periods with "
          "length = # months remaining in retirement, between the Historical Analysis Start Date and the current "
          "simulation date.\n\nSetting this higher is more conservative, and will cause you to decrease your spending "
          "sooner when markets are down.",
@@ -310,7 +310,7 @@ upper_adjustment_fraction = st.sidebar.slider(
     help="How much to increase spending when we hit the upper guardrail.\n\nExpressed as a % of the distance between "
          "the Upper Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the upper guardrail "
          "represents 100% success and the target is 90%, setting this value to 50% means we go half the distance back "
-         "to the target, and our new withdrawal rate will be based on a 95% chance of success.\n\nSetting this higher "
+         "to the target, and our new spending rate will be based on a 95% chance of success.\n\nSetting this higher "
          "is more aggressive, and will cause you to make larger spending increases when you hit the upper guardrail."
 )
 
@@ -324,7 +324,7 @@ lower_adjustment_fraction = st.sidebar.slider(
     help="How much to decrease spending when we hit the lower guardrail.\n\nExpressed as a % of the distance between "
          "the Lower Guardrail Success Rate and the Target Success Rate.\n\nFor example, if the lower guardrail "
          "represents 70% success and the target is 90%, setting this value to 50% means we go half the distance back "
-         "to the target, and our new withdrawal rate will be based on an 80% chance of success.\n\nSetting this higher "
+         "to the target, and our new spending rate will be based on an 80% chance of success.\n\nSetting this higher "
          "is more conservative, and will cause you to make larger spending decreases when you hit the lower guardrail."
 )
 
@@ -418,6 +418,14 @@ settings = Settings(
 
 st.session_state["settings"] = settings
 
+# Warn if guardrail success rates are in unexpected order
+if not (lower_guardrail_success <= target_success_rate <= upper_guardrail_success):
+    st.sidebar.warning(
+        "Guardrail success rates are in an unusual order. Typically: "
+        "Lower Guardrail \u2264 Target \u2264 Upper Guardrail. "
+        "Current values may produce unexpected behavior."
+    )
+
 encoded_config = settings.to_base64()
 st.session_state["_encoded_settings"] = encoded_config
 share_link_url = f"?config={encoded_config}"
@@ -436,11 +444,7 @@ if dirty and not is_guidance:
 if is_guidance:
     # Guidance Mode: run a single-iteration snapshot and display text output
 
-    # Load Shiller data (cached)
-    shiller_df = st.session_state.get('shiller_df')
-    if shiller_df is None:
-        shiller_df = utils.load_shiller_data()
-        st.session_state['shiller_df'] = shiller_df
+    shiller_df = utils.get_cached_shiller_df(st.session_state)
 
     # Use the latest available Shiller data date (<= today) as the as-of date.
     today = datetime.date.today()
@@ -465,10 +469,7 @@ elif st.sidebar.button(
 ):
     status_ph = st.empty()
     status_ph.text("Loading Shiller data...")
-    shiller_df = st.session_state.get('shiller_df')
-    if shiller_df is None:
-        shiller_df = utils.load_shiller_data()
-        st.session_state['shiller_df'] = shiller_df
+    shiller_df = utils.get_cached_shiller_df(st.session_state)
     status_ph.text("Shiller data loaded.")
 
     # Progress bar shown in the same status line area (0% -> 100%)
