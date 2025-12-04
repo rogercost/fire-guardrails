@@ -247,7 +247,8 @@ class Settings:
         session_state["spending_floor_option"] = self.spending_floor_option
         session_state["cashflows"] = [flow.to_serializable() for flow in self.cashflows]
 
-    def to_iwr_params(self) -> Dict[str, Any]:
+    def to_isr_params(self) -> Dict[str, Any]:
+        """Return parameters for computing the initial spending rate."""
         return {
             "start_date": self.start_date,
             "duration_months": int(self.retirement_duration_months),

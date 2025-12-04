@@ -188,17 +188,17 @@ def calculate_success_rate(df, withdrawal_rate, num_months, stock_pct=0.75,
     return test_all_periods(portfolio_returns, num_months, initial_value, monthly_spending, monthly_cashflows)
 
 
-def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
-                                  analysis_start_date='1871-01-01',
-                                  analysis_end_date=None,
-                                  initial_value=1_000_000, stock_pct=0.75,
-                                  tolerance=0.001, max_iterations=50,
-                                  verbose=False,
-                                  cashflows=None,
-                                  cashflow_start_offset=0,
-                                  cashflow_schedule=None):
+def get_spending_rate_for_fixed_success_rate(df, desired_success_rate, num_months,
+                                             analysis_start_date='1871-01-01',
+                                             analysis_end_date=None,
+                                             initial_value=1_000_000, stock_pct=0.75,
+                                             tolerance=0.001, max_iterations=50,
+                                             verbose=False,
+                                             cashflows=None,
+                                             cashflow_start_offset=0,
+                                             cashflow_schedule=None):
     """
-    Compute the annual withdrawal rate such that a historical simulation over periods of the desired length
+    Compute the annual spending rate such that a historical simulation over periods of the desired length
     yields the desired success rate.
 
     Parameters
@@ -206,7 +206,7 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
     df : pd.DataFrame
         The main dataframe with market data
     desired_success_rate : float
-        The target chance of underspending (e.g., 0.90 for 90%),
+        The target chance of not depleting the portfolio (e.g., 0.90 for 90%),
         the percent of simulation paths that should have ending portfolio values > 0.
     num_months : int
         The size of the time window of the historical simulation paths to run
@@ -229,7 +229,7 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
     -------
     dict
         Dictionary containing:
-        - 'withdrawal_rate': The annual withdrawal rate that achieves the target success rate
+        - 'spending_rate': The annual spending rate that achieves the target success rate
         - 'actual_success_rate': The actual success rate achieved
         - 'num_simulations': Number of simulation paths run
         - 'iterations': Number of binary search iterations performed
@@ -274,16 +274,16 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
         if len(monthly_cashflows) != num_months:
             raise ValueError("cashflow_schedule length must match num_months")
 
-    # Binary search for the withdrawal rate
-    low_rate = 0  # 0.0% annual withdrawal rate
-    high_rate = 0.20  # 20% annual withdrawal rate
+    # Binary search for the spending rate
+    low_rate = 0  # 0.0% annual spending rate
+    high_rate = 0.20  # 20% annual spending rate
 
     iteration = 0
     best_rate = None
     best_success_rate = None
 
     if verbose:
-        print(f"Searching for withdrawal rate with {desired_success_rate:.1%} success rate...")
+        print(f"Searching for spending rate with {desired_success_rate:.1%} success rate...")
 
     while iteration < max_iterations:
         mid_rate = (low_rate + high_rate) / 2
@@ -304,22 +304,22 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
             best_rate = mid_rate
             best_success_rate = current_success_rate
             if verbose:
-                print(f"Converged! Found withdrawal rate within tolerance.")
+                print(f"Converged! Found spending rate within tolerance.")
             break
 
         # Adjust search bounds
-        # If success rate is too high, we can withdraw more
+        # If success rate is too high, we can spend more
         if current_success_rate > desired_success_rate:
             low_rate = mid_rate
             if verbose:
                 print(f"Success rate at {mid_rate} is too high ({current_success_rate:.3f} > {desired_success_rate:.3f}), "
-                      f"increasing withdrawal rate range to [{low_rate:.4f}, {high_rate:.4f}]")
+                      f"increasing spending rate range to [{low_rate:.4f}, {high_rate:.4f}]")
         else:
-            # If success rate is too low, we need to withdraw less
+            # If success rate is too low, we need to spend less
             high_rate = mid_rate
             if verbose:
                 print(f"Success rate at {mid_rate} is too low ({current_success_rate:.3f} < {desired_success_rate:.3f}), "
-                      f"decreasing withdrawal rate range to [{low_rate:.4f}, {high_rate:.4f}]")
+                      f"decreasing spending rate range to [{low_rate:.4f}, {high_rate:.4f}]")
 
         best_rate = mid_rate
         best_success_rate = current_success_rate
@@ -331,7 +331,7 @@ def get_wr_for_fixed_success_rate(df, desired_success_rate, num_months,
 
     # Return results
     return {
-        'withdrawal_rate': best_rate,
+        'spending_rate': best_rate,
         'actual_success_rate': best_success_rate,
         'num_simulations': num_paths,
         'iterations': iteration + 1
@@ -445,9 +445,9 @@ def get_guardrail_withdrawals(
 
         current_cashflow = float(monthly_cashflows[i]) if i < len(monthly_cashflows) else 0.0
 
-        def get_withdrawal_rate(success_rate):
+        def get_spending_rate(success_rate):
             schedule_slice = monthly_cashflows[i:i + months_remaining]
-            return get_wr_for_fixed_success_rate(
+            return get_spending_rate_for_fixed_success_rate(
                 df=df,
                 desired_success_rate=success_rate,
                 num_months=months_remaining,
@@ -457,20 +457,20 @@ def get_guardrail_withdrawals(
                 stock_pct=settings.stock_pct,
                 cashflows=cashflows,
                 cashflow_schedule=schedule_slice,
-            )['withdrawal_rate']
+            )['spending_rate']
 
         if not guardrail_depleted:
 
-            # Calculate the upper and lower guardrail withdrawal rates, based on the current spending and months remaining
+            # Calculate the upper and lower guardrail spending rates, based on the current spending and months remaining
             #
-            upper_wr = get_withdrawal_rate(success_rate=settings.upper_guardrail_success)
-            lower_wr = get_withdrawal_rate(success_rate=settings.lower_guardrail_success)
+            upper_sr = get_spending_rate(success_rate=settings.upper_guardrail_success)
+            lower_sr = get_spending_rate(success_rate=settings.lower_guardrail_success)
 
-            # The guardrail portfolio values are the values that would result in the current withdrawal amount
+            # The guardrail portfolio values are the values that would result in the current spending amount
             # representing a probability of success equal to each guardrail's probability.
             #
-            upper_guardrail_value = previous_total_spending / upper_wr * 12 if upper_wr > 0 else np.inf
-            lower_guardrail_value = previous_total_spending / lower_wr * 12 if lower_wr > 0 else np.inf
+            upper_guardrail_value = previous_total_spending / upper_sr * 12 if upper_sr > 0 else np.inf
+            lower_guardrail_value = previous_total_spending / lower_sr * 12 if lower_sr > 0 else np.inf
 
             if verbose and i % 12 == 0:
                 print(f"Processing {current_date.strftime('%Y-%m')}, portfolio=${current_portfolio_value:,.0f}, "
@@ -486,16 +486,16 @@ def get_guardrail_withdrawals(
                     desired_success_rate = settings.upper_guardrail_success + settings.upper_adjustment_fraction * (
                         settings.target_success_rate - settings.upper_guardrail_success
                     )
-                    new_wr = get_withdrawal_rate(success_rate=desired_success_rate)
-                    new_proposed_spending = current_portfolio_value * new_wr / 12
+                    new_sr = get_spending_rate(success_rate=desired_success_rate)
+                    new_proposed_spending = current_portfolio_value * new_sr / 12
                     guardrail_hit = "UPPER"
 
                 elif hit_lower:
                     desired_success_rate = settings.lower_guardrail_success + settings.lower_adjustment_fraction * (
                         settings.target_success_rate - settings.lower_guardrail_success
                     )
-                    new_wr = get_withdrawal_rate(success_rate=desired_success_rate)
-                    new_proposed_spending = current_portfolio_value * new_wr / 12
+                    new_sr = get_spending_rate(success_rate=desired_success_rate)
+                    new_proposed_spending = current_portfolio_value * new_sr / 12
                     guardrail_hit = "LOWER"
 
                 else:
@@ -542,11 +542,8 @@ def get_guardrail_withdrawals(
         withdrawal_amount = spending_target - current_cashflow
         if withdrawal_amount < 0.0:
             withdrawal_amount = 0.0
-        total_income = withdrawal_amount + current_cashflow
-
         # Fixed path withdrawal for this month
         fixed_actual_withdrawal = 0.0 if fixed_depleted else max(fixed_total_spending - current_cashflow, 0.0)
-        fixed_total_income = fixed_actual_withdrawal + current_cashflow
 
         # Store results
         results.append({
@@ -554,11 +551,10 @@ def get_guardrail_withdrawals(
             'Withdrawal': withdrawal_amount,
             'Total_Spending': spending_target,
             'Net_Cashflow': current_cashflow,
-            'Total_Income': total_income,
             'Portfolio_Value': current_portfolio_value,
-            'Fixed_WR_Value': fixed_portfolio_value,
-            'Fixed_WR_Withdrawal': fixed_actual_withdrawal,
-            'Fixed_WR_Total_Income': fixed_total_income,
+            'Fixed_SR_Value': fixed_portfolio_value,
+            'Fixed_SR_Withdrawal': fixed_actual_withdrawal,
+            'Fixed_SR_Total_Spending': fixed_total_spending,
             'Upper_Guardrail': upper_guardrail_value,
             'Lower_Guardrail': lower_guardrail_value,
             'Guardrail_Hit': guardrail_hit,
@@ -613,8 +609,8 @@ def compute_guardrail_guidance_snapshot(
     -----
     This mirrors the first-iteration logic in :func:`get_guardrail_withdrawals`:
       - Determine months_remaining based on [asof_date .. end_date]
-      - Compute WRs at target, upper, lower success rates using analysis_end_date=asof_date
-      - Guardrail portfolio values are the PVs at which CURRENT spending would equal those WRs
+      - Compute spending rates at target, upper, lower success rates using analysis_end_date=asof_date
+      - Guardrail portfolio values are the PVs at which CURRENT spending would equal those spending rates
       - Hypothetical adjustments on guardrail hit are computed by moving partway back toward the target
         using the upper/lower adjustment fractions. Threshold gating is intentionally ignored.
 
@@ -636,11 +632,11 @@ def compute_guardrail_guidance_snapshot(
     first_year_months = min(12, len(monthly_cashflows))
     annual_cashflow_total = float(np.sum(monthly_cashflows[:first_year_months])) if first_year_months else 0.0
 
-    # Helper to compute WR for a given success rate at 'asof'
-    def _wr(desired_sr: float):
-        res = get_wr_for_fixed_success_rate(
+    # Helper to compute spending rate for a given success rate at 'asof'
+    def _sr(desired_success_rate: float):
+        res = get_spending_rate_for_fixed_success_rate(
             df=df,
-            desired_success_rate=float(desired_sr),
+            desired_success_rate=float(desired_success_rate),
             num_months=num_months,
             analysis_start_date=settings.analysis_start_date,
             analysis_end_date=asof,
@@ -649,51 +645,51 @@ def compute_guardrail_guidance_snapshot(
             cashflows=cashflows,
             cashflow_schedule=monthly_cashflows,
         )
-        return float(res["withdrawal_rate"]) if res["withdrawal_rate"] is not None else None
+        return float(res["spending_rate"]) if res["spending_rate"] is not None else None
 
-    target_wr = _wr(settings.target_success_rate)
-    upper_wr = _wr(settings.upper_guardrail_success)
-    lower_wr = _wr(settings.lower_guardrail_success)
+    target_sr = _sr(settings.target_success_rate)
+    upper_sr = _sr(settings.upper_guardrail_success)
+    lower_sr = _sr(settings.lower_guardrail_success)
 
-    # Guardrail PVs where CURRENT spending equals the WR for upper/lower SRs (matches simulation logic)
+    # Guardrail PVs where CURRENT spending equals the spending rate for upper/lower success rates (matches simulation logic)
     use_spending = (
         float(settings.initial_monthly_spending)
         if settings.initial_monthly_spending is not None
         else None
     )
 
-    if upper_wr is not None and upper_wr > 0 and use_spending is not None:
-        upper_guardrail_value = use_spending / upper_wr * 12.0
+    if upper_sr is not None and upper_sr > 0 and use_spending is not None:
+        upper_guardrail_value = use_spending / upper_sr * 12.0
     else:
         upper_guardrail_value = np.inf
 
-    if lower_wr is not None and lower_wr > 0 and use_spending is not None:
-        lower_guardrail_value = use_spending / lower_wr * 12.0
+    if lower_sr is not None and lower_sr > 0 and use_spending is not None:
+        lower_guardrail_value = use_spending / lower_sr * 12.0
     else:
         lower_guardrail_value = np.inf
 
     # Hypothetical adjustment targets if guardrails were hit (move back toward target)
-    desired_upper_sr = settings.upper_guardrail_success + settings.upper_adjustment_fraction * (
+    desired_upper_success_rate = settings.upper_guardrail_success + settings.upper_adjustment_fraction * (
         settings.target_success_rate - settings.upper_guardrail_success
     )
-    desired_lower_sr = settings.lower_guardrail_success + settings.lower_adjustment_fraction * (
+    desired_lower_success_rate = settings.lower_guardrail_success + settings.lower_adjustment_fraction * (
         settings.target_success_rate - settings.lower_guardrail_success
     )
 
-    adj_upper_wr = _wr(desired_upper_sr)
-    adj_lower_wr = _wr(desired_lower_sr)
+    adj_upper_sr = _sr(desired_upper_success_rate)
+    adj_lower_sr = _sr(desired_lower_success_rate)
 
     # At a guardrail hit, the simulation computes the new spending using the portfolio value at the hit.
     # Mirror that here by using the guardrail PVs rather than today's PV for the hypothetical adjustments
     # and apply the same cap/floor bounds that the simulation enforces.
     adj_upper_monthly = (
-        float(upper_guardrail_value) * adj_upper_wr / 12.0
-        if (adj_upper_wr is not None and np.isfinite(upper_guardrail_value))
+        float(upper_guardrail_value) * adj_upper_sr / 12.0
+        if (adj_upper_sr is not None and np.isfinite(upper_guardrail_value))
         else None
     )
     adj_lower_monthly = (
-        float(lower_guardrail_value) * adj_lower_wr / 12.0
-        if (adj_lower_wr is not None and np.isfinite(lower_guardrail_value))
+        float(lower_guardrail_value) * adj_lower_sr / 12.0
+        if (adj_lower_sr is not None and np.isfinite(lower_guardrail_value))
         else None
     )
 
@@ -705,14 +701,15 @@ def compute_guardrail_guidance_snapshot(
             float(new_amt) - float(settings.initial_monthly_spending)
         ) / float(settings.initial_monthly_spending)
 
-    implied_wr = (
+    # Implied spending rate from current spending and portfolio value
+    implied_sr = (
         (float(settings.initial_monthly_spending) * 12.0 / float(settings.initial_value))
         if float(settings.initial_value) > 0
         else None
     )
     target_monthly_spending = (
-        float(settings.initial_value) * target_wr / 12.0
-        if target_wr is not None
+        float(settings.initial_value) * target_sr / 12.0
+        if target_sr is not None
         else None
     )
     target_monthly_withdrawal = None
@@ -726,11 +723,23 @@ def compute_guardrail_guidance_snapshot(
             ]
             target_annual_withdrawal = float(np.sum(annual_withdrawals))
 
+    # Calculate actual withdrawal rates (spending rate minus effect of cashflows)
+    # Withdrawal rate = (monthly withdrawal * 12) / portfolio value
+    implied_withdrawal_rate = None
+    target_withdrawal_rate = None
+    if float(settings.initial_value) > 0:
+        current_withdrawal = max(float(settings.initial_monthly_spending) - current_cashflow_amount, 0.0)
+        implied_withdrawal_rate = (current_withdrawal * 12.0) / float(settings.initial_value)
+        if target_monthly_withdrawal is not None:
+            target_withdrawal_rate = (target_monthly_withdrawal * 12.0) / float(settings.initial_value)
+
     return {
         "asof_date": asof,
         "months_remaining": num_months,
-        "implied_withdrawal_rate": implied_wr,
-        "target_withdrawal_rate": target_wr,
+        "implied_spending_rate": implied_sr,
+        "target_spending_rate": target_sr,
+        "implied_withdrawal_rate": implied_withdrawal_rate,
+        "target_withdrawal_rate": target_withdrawal_rate,
         "target_monthly_spending": target_monthly_spending,
         "target_monthly_withdrawal": target_monthly_withdrawal,
         "target_annual_withdrawal": target_annual_withdrawal,
