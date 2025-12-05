@@ -139,7 +139,7 @@ def compute_portfolio_returns(stock_prices, bond_prices, stock_pct):
 
 
 @nb.jit(nopython=True)
-def test_all_periods(portfolio_returns, num_months, initial_value, monthly_spending, monthly_cashflows):
+def test_all_periods(portfolio_returns, num_months, initial_value, monthly_spending, monthly_cashflows, final_value_target):
     """
     Run all paths of a given length that exist in the supplied portfolio_reurns array,
     capturing the success or failure of each path, and returning the proportion of successes.
@@ -160,7 +160,8 @@ def test_all_periods(portfolio_returns, num_months, initial_value, monthly_spend
             if value <= 0:
                 break
 
-        if value > 0:
+        # Success requires: didn't deplete AND final value >= target
+        if value > 0 and value >= final_value_target:
             successes += 1
 
     return successes / num_periods
@@ -168,7 +169,8 @@ def test_all_periods(portfolio_returns, num_months, initial_value, monthly_spend
 
 def calculate_success_rate(df, withdrawal_rate, num_months, stock_pct=0.75,
                            analysis_start_date='1871-01-01', analysis_end_date=None,
-                           initial_value=1_000_000, monthly_cashflows=None):
+                           initial_value=1_000_000, monthly_cashflows=None,
+                           final_value_target=0.0):
     """
     Calculate the success rate for a given withdrawal rate.
     Numba-accelerated version. Should be 500x+ faster than brute force.
@@ -197,7 +199,7 @@ def calculate_success_rate(df, withdrawal_rate, num_months, stock_pct=0.75,
             raise ValueError("monthly_cashflows length must match num_months")
 
     # Call the compiled function
-    return test_all_periods(portfolio_returns, num_months, initial_value, monthly_spending, monthly_cashflows)
+    return test_all_periods(portfolio_returns, num_months, initial_value, monthly_spending, monthly_cashflows, final_value_target)
 
 
 def get_spending_rate_for_fixed_success_rate(df, desired_success_rate, num_months,
@@ -208,7 +210,8 @@ def get_spending_rate_for_fixed_success_rate(df, desired_success_rate, num_month
                                              verbose=False,
                                              cashflows=None,
                                              cashflow_start_offset=0,
-                                             cashflow_schedule=None):
+                                             cashflow_schedule=None,
+                                             final_value_target=0.0):
     """
     Compute the annual spending rate such that a historical simulation over periods of the desired length
     yields the desired success rate.
@@ -309,6 +312,7 @@ def get_spending_rate_for_fixed_success_rate(df, desired_success_rate, num_month
             analysis_end_date,
             initial_value,
             monthly_cashflows=monthly_cashflows,
+            final_value_target=final_value_target,
         )
 
         # Check if we're within tolerance
@@ -359,6 +363,7 @@ def _compute_spending_rate_at_date(
     stock_pct: float,
     cashflows: list,
     cashflow_schedule_slice,
+    final_value_target: float = 0.0,
 ) -> float:
     """Compute spending rate for a given success rate at a specific point in time."""
     result = get_spending_rate_for_fixed_success_rate(
@@ -371,6 +376,7 @@ def _compute_spending_rate_at_date(
         stock_pct=stock_pct,
         cashflows=cashflows,
         cashflow_schedule=cashflow_schedule_slice,
+        final_value_target=final_value_target,
     )
     return result['spending_rate']
 
@@ -481,6 +487,7 @@ def get_guardrail_withdrawals(
                 df, success_rate, months_remaining, settings.analysis_start_date,
                 current_date, current_portfolio_value, settings.stock_pct,
                 cashflows, schedule_slice,
+                final_value_target=settings.final_value_target,
             )
 
         if not guardrail_depleted:
@@ -668,6 +675,7 @@ def compute_guardrail_guidance_snapshot(
             stock_pct=float(settings.stock_pct),
             cashflows=cashflows,
             cashflow_schedule=monthly_cashflows,
+            final_value_target=float(settings.final_value_target),
         )
         return float(res["spending_rate"]) if res["spending_rate"] is not None else None
 
