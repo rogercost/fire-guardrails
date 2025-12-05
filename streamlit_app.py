@@ -389,7 +389,11 @@ with st.sidebar.expander("Advanced Controls"):
         help="Minimum ending portfolio value required for a simulation to be considered successful. "
              "Set to $0 for no bequest requirement. When set higher, the simulation will count "
              "as a failure if the portfolio ends below this amount, even if it never depleted. "
-             "This affects both the success rate calculation and the recommended safe spending rate.",
+             "This affects both the success rate calculation and the recommended safe spending rate.\n\n"
+             "Note that setting this too high may result in huge upper guardrail values - particularly "
+             "if the portfolio value during retirement crosses below this value, as the required spending "
+             "% rate (the denominator of the calculation) for the portfolio to end higher than its current "
+             "value approaches zero.",
     )
 
     if st.button("Add Recurring Cashflow", key="add_cashflow_btn"):
