@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app_settings import CashflowSetting, Settings
+from app_settings import CashflowSetting, ConditionalCashflowSetting, Settings
 
 
 class TestCashflowSetting:
@@ -64,6 +64,117 @@ class TestCashflowSetting:
         cf = CashflowSetting(start_month=0, end_month=12, amount=1000.0, label="Test")
         sig = cf.signature()
         assert sig == (0, 12, 1000.0)
+
+
+class TestConditionalCashflowSetting:
+    """Tests for ConditionalCashflowSetting dataclass."""
+
+    def test_from_dict_valid_one_time(self):
+        data = {
+            "cashflow_type": "one_time",
+            "trigger_threshold": "50%",
+            "amount": 5000.0,
+            "label": "Sell house",
+        }
+        result = ConditionalCashflowSetting.from_dict(data)
+        assert result is not None
+        assert result.cashflow_type == "one_time"
+        assert result.trigger_threshold == "50%"
+        assert result.amount == 5000.0
+        assert result.label == "Sell house"
+
+    def test_from_dict_valid_recurring(self):
+        data = {
+            "cashflow_type": "recurring",
+            "trigger_threshold": "75%",
+            "amount": 500.0,
+            "label": "Part-time job",
+        }
+        result = ConditionalCashflowSetting.from_dict(data)
+        assert result is not None
+        assert result.cashflow_type == "recurring"
+        assert result.trigger_threshold == "75%"
+
+    def test_from_dict_missing_label(self):
+        data = {"cashflow_type": "one_time", "trigger_threshold": "50%", "amount": 1000.0}
+        result = ConditionalCashflowSetting.from_dict(data)
+        assert result is not None
+        assert result.label == ""
+
+    def test_from_dict_invalid_type(self):
+        data = {"cashflow_type": "invalid", "trigger_threshold": "50%", "amount": 1000.0}
+        result = ConditionalCashflowSetting.from_dict(data)
+        assert result is None
+
+    def test_from_dict_non_dict_input(self):
+        result = ConditionalCashflowSetting.from_dict("not a dict")
+        assert result is None
+
+    def test_from_dict_defaults(self):
+        data = {"amount": 1000.0}
+        result = ConditionalCashflowSetting.from_dict(data)
+        assert result is not None
+        assert result.cashflow_type == "one_time"
+        assert result.trigger_threshold == "50%"
+
+    def test_trigger_threshold_multiplier(self):
+        cf = ConditionalCashflowSetting(
+            cashflow_type="recurring",
+            trigger_threshold="75%",
+            amount=500.0,
+        )
+        assert cf.trigger_threshold_multiplier == 0.75
+
+    def test_trigger_threshold_multiplier_various_values(self):
+        test_cases = [
+            ("5%", 0.05),
+            ("50%", 0.50),
+            ("95%", 0.95),
+        ]
+        for threshold, expected in test_cases:
+            cf = ConditionalCashflowSetting(
+                cashflow_type="one_time",
+                trigger_threshold=threshold,
+                amount=100.0,
+            )
+            assert cf.trigger_threshold_multiplier == expected
+
+    def test_to_serializable_roundtrip(self):
+        original = ConditionalCashflowSetting(
+            cashflow_type="recurring",
+            trigger_threshold="60%",
+            amount=750.0,
+            label="Test",
+        )
+        serialized = original.to_serializable()
+        restored = ConditionalCashflowSetting.from_dict(serialized)
+        assert restored.cashflow_type == original.cashflow_type
+        assert restored.trigger_threshold == original.trigger_threshold
+        assert restored.amount == original.amount
+        assert restored.label == original.label
+
+    def test_to_calculation_dict(self):
+        cf = ConditionalCashflowSetting(
+            cashflow_type="one_time",
+            trigger_threshold="40%",
+            amount=10000.0,
+            label="Test",
+        )
+        calc_dict = cf.to_calculation_dict()
+        assert "label" not in calc_dict
+        assert calc_dict["cashflow_type"] == "one_time"
+        assert calc_dict["trigger_threshold_multiplier"] == 0.4
+        assert calc_dict["amount"] == 10000.0
+
+    def test_signature(self):
+        cf = ConditionalCashflowSetting(
+            cashflow_type="recurring",
+            trigger_threshold="50%",
+            amount=500.0,
+            label="Test",
+        )
+        sig = cf.signature()
+        assert sig == ("recurring", "50%", 500.0)
 
 
 class TestSettings:
@@ -224,6 +335,51 @@ class TestSettings:
         assert len(restored.cashflows) == 2
         assert restored.cashflows[0].amount == 2000.0
         assert restored.cashflows[1].label == "Pension"
+
+    def test_conditional_cashflows_preserved_in_roundtrip(self):
+        conditional_cashflows = [
+            ConditionalCashflowSetting(
+                cashflow_type="one_time",
+                trigger_threshold="40%",
+                amount=10000.0,
+                label="House sale",
+            ),
+            ConditionalCashflowSetting(
+                cashflow_type="recurring",
+                trigger_threshold="60%",
+                amount=500.0,
+                label="Part-time job",
+            ),
+        ]
+        settings = Settings(
+            mode="Simulation Mode",
+            start_date=datetime.date(2020, 1, 1),
+            retirement_duration_months=360,
+            analysis_start_date=datetime.date(1871, 1, 1),
+            initial_value=1_000_000.0,
+            stock_pct=0.75,
+            target_success_rate=0.90,
+            initial_monthly_spending=4000.0,
+            initial_spending_overridden=False,
+            upper_guardrail_success=1.0,
+            lower_guardrail_success=0.75,
+            upper_adjustment_fraction=1.0,
+            lower_adjustment_fraction=0.1,
+            adjustment_threshold=0.05,
+            adjustment_frequency="Monthly",
+            spending_cap_option="Unlimited",
+            spending_floor_option="Unlimited",
+            cashflows=[],
+            conditional_cashflows=conditional_cashflows,
+        )
+        encoded = settings.to_base64()
+        restored = Settings.from_base64(encoded)
+        assert len(restored.conditional_cashflows) == 2
+        assert restored.conditional_cashflows[0].cashflow_type == "one_time"
+        assert restored.conditional_cashflows[0].trigger_threshold == "40%"
+        assert restored.conditional_cashflows[0].amount == 10000.0
+        assert restored.conditional_cashflows[1].cashflow_type == "recurring"
+        assert restored.conditional_cashflows[1].label == "Part-time job"
 
     def test_simulation_signature_changes_with_inputs(self, default_settings):
         sig1 = default_settings.simulation_signature()

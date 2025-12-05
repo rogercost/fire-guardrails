@@ -397,6 +397,92 @@ def is_adjustment_month(ts: pd.Timestamp, adjustment_frequency: str) -> bool:
     return True
 
 
+def evaluate_conditional_cashflows(
+    spending_target: float,
+    initial_spending: float,
+    month_idx: int,
+    conditional_configs: list,
+    one_time_triggered: dict,
+    recurring_state: dict,
+) -> float:
+    """
+    Evaluate conditional cashflows and return total conditional cashflow amount.
+
+    Parameters
+    ----------
+    spending_target : float
+        The current month's spending level (after cap/floor bounds).
+    initial_spending : float
+        The initial monthly spending amount used as the baseline for thresholds.
+    month_idx : int
+        Zero-based index of the current month in the simulation.
+    conditional_configs : list
+        List of conditional cashflow configuration dicts with keys:
+        - cashflow_type: "one_time" or "recurring"
+        - trigger_threshold_multiplier: float (0.05 to 0.95)
+        - amount: float
+    one_time_triggered : dict
+        State tracking for one-time cashflows: {idx: triggered_month or None}.
+        Updated in place.
+    recurring_state : dict
+        State tracking for recurring cashflows: {idx: {"active": bool, "started_month": int or None}}.
+        Updated in place.
+
+    Returns
+    -------
+    float
+        Total conditional cashflow amount for this month.
+    """
+    conditional_total = 0.0
+
+    if initial_spending <= 0:
+        return conditional_total
+
+    spending_ratio = spending_target / initial_spending
+
+    for idx, cfg in enumerate(conditional_configs):
+        threshold = cfg["trigger_threshold_multiplier"]
+        amount = cfg["amount"]
+
+        if cfg["cashflow_type"] == "one_time":
+            triggered_month = one_time_triggered.get(idx)
+            if triggered_month is not None:
+                # Already triggered - check if this is the month after trigger
+                if month_idx == triggered_month + 1:
+                    # One-time contribution in the month following trigger
+                    conditional_total += amount
+                # After that month, no more contribution
+            else:
+                # Not yet triggered - check condition
+                if spending_ratio < threshold:
+                    # Trigger! Mark as triggered, will apply NEXT month
+                    one_time_triggered[idx] = month_idx
+
+        else:  # recurring
+            state = recurring_state.get(idx, {"active": False, "started_month": None})
+
+            if state["active"]:
+                # Currently active - check for recovery (100%+ of initial)
+                if spending_ratio >= 1.0:
+                    # Recovery - deactivate
+                    state["active"] = False
+                    state["started_month"] = None
+                else:
+                    # Still active - contribute
+                    conditional_total += amount
+            else:
+                # Not active - check for activation
+                if spending_ratio < threshold:
+                    # Activate! Will apply starting NEXT month
+                    state["active"] = True
+                    state["started_month"] = month_idx
+                    # Note: no contribution this month (starts next month)
+
+            recurring_state[idx] = state
+
+    return conditional_total
+
+
 def get_guardrail_withdrawals(
     df,
     settings: Settings,
@@ -466,6 +552,17 @@ def get_guardrail_withdrawals(
 
     guardrail_depleted = False
     fixed_depleted = False
+
+    # Conditional cashflow state tracking
+    initial_spending_for_conditionals = float(settings.initial_monthly_spending)
+    conditional_configs = settings.conditional_cashflows_for_calculation()
+    one_time_triggered = {}  # {idx: triggered_month or None}
+    recurring_state = {}     # {idx: {"active": bool, "started_month": int or None}}
+    for idx, cfg in enumerate(conditional_configs):
+        if cfg["cashflow_type"] == "one_time":
+            one_time_triggered[idx] = None
+        else:
+            recurring_state[idx] = {"active": False, "started_month": None}
 
     for i, row in subset.iterrows():
         current_date = row['Date']
@@ -570,10 +667,23 @@ def get_guardrail_withdrawals(
             percent_change = 0.0
             adjustment_allowed = False
 
-        withdrawal_amount = spending_target - current_cashflow
-        if withdrawal_amount < 0.0:
-            withdrawal_amount = 0.0
-        # Fixed path withdrawal for this month
+        # Evaluate conditional cashflows (modifies state dicts in place)
+        conditional_cashflow = evaluate_conditional_cashflows(
+            spending_target=spending_target,
+            initial_spending=initial_spending_for_conditionals,
+            month_idx=i,
+            conditional_configs=conditional_configs,
+            one_time_triggered=one_time_triggered,
+            recurring_state=recurring_state,
+        )
+
+        # Combine regular and conditional cashflows
+        total_cashflow = current_cashflow + conditional_cashflow
+
+        withdrawal_amount = spending_target - total_cashflow
+        # Note: withdrawal_amount can be negative when cashflow exceeds spending,
+        # which effectively deposits the excess into the portfolio
+        # Fixed path withdrawal for this month (does not include conditional cashflows)
         fixed_actual_withdrawal = 0.0 if fixed_depleted else max(fixed_total_spending - current_cashflow, 0.0)
 
         # Store results
@@ -581,7 +691,8 @@ def get_guardrail_withdrawals(
             'Date': current_date,
             'Withdrawal': withdrawal_amount,
             'Total_Spending': spending_target,
-            'Net_Cashflow': current_cashflow,
+            'Net_Cashflow': total_cashflow,
+            'Conditional_Cashflow': conditional_cashflow,
             'Portfolio_Value': current_portfolio_value,
             'Fixed_SR_Value': fixed_portfolio_value,
             'Fixed_SR_Withdrawal': fixed_actual_withdrawal,

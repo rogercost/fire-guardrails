@@ -182,7 +182,7 @@ class TestTestAllPeriods:
         portfolio_returns = np.array([1.01] * 12)  # 1% monthly return
         monthly_cashflows = np.zeros(6, dtype=np.float64)
         result = utils.test_all_periods(
-            portfolio_returns, 6, 100000.0, 0.0, monthly_cashflows
+            portfolio_returns, 6, 100000.0, 0.0, monthly_cashflows, 0.0
         )
         assert result == 1.0  # 100% success
 
@@ -192,7 +192,7 @@ class TestTestAllPeriods:
         monthly_cashflows = np.zeros(6, dtype=np.float64)
         # Withdraw more than initial value over 6 months
         result = utils.test_all_periods(
-            portfolio_returns, 6, 100000.0, 20000.0, monthly_cashflows
+            portfolio_returns, 6, 100000.0, 20000.0, monthly_cashflows, 0.0
         )
         assert result == 0.0  # 0% success
 
@@ -201,7 +201,7 @@ class TestTestAllPeriods:
         portfolio_returns = np.array([1.0] * 12)
         monthly_cashflows = np.array([5000.0] * 6, dtype=np.float64)
         result = utils.test_all_periods(
-            portfolio_returns, 6, 100000.0, 5000.0, monthly_cashflows
+            portfolio_returns, 6, 100000.0, 5000.0, monthly_cashflows, 0.0
         )
         assert result == 1.0  # 100% success - net withdrawal is 0
 
@@ -224,3 +224,209 @@ class TestGetCachedShillerDf:
         session_state = {'shiller_df': fake_df}
         result = utils.get_cached_shiller_df(session_state)
         assert result is fake_df
+
+
+class TestEvaluateConditionalCashflows:
+    """Tests for evaluate_conditional_cashflows function."""
+
+    def test_empty_configs(self):
+        result = utils.evaluate_conditional_cashflows(
+            spending_target=400.0,
+            initial_spending=1000.0,
+            month_idx=0,
+            conditional_configs=[],
+            one_time_triggered={},
+            recurring_state={},
+        )
+        assert result == 0.0
+
+    def test_one_time_triggers_and_applies_next_month(self):
+        configs = [{"cashflow_type": "one_time", "trigger_threshold_multiplier": 0.5, "amount": 1000.0}]
+        triggered = {0: None}
+        recurring = {}
+
+        # Month 0: spending at 40% of initial - triggers
+        result = utils.evaluate_conditional_cashflows(
+            spending_target=400.0,
+            initial_spending=1000.0,
+            month_idx=0,
+            conditional_configs=configs,
+            one_time_triggered=triggered,
+            recurring_state=recurring,
+        )
+        assert result == 0.0  # No contribution in trigger month
+        assert triggered[0] == 0  # Marked as triggered in month 0
+
+        # Month 1: cashflow applied
+        result = utils.evaluate_conditional_cashflows(
+            spending_target=400.0,
+            initial_spending=1000.0,
+            month_idx=1,
+            conditional_configs=configs,
+            one_time_triggered=triggered,
+            recurring_state=recurring,
+        )
+        assert result == 1000.0  # One-time contribution
+
+        # Month 2: no more contribution
+        result = utils.evaluate_conditional_cashflows(
+            spending_target=400.0,
+            initial_spending=1000.0,
+            month_idx=2,
+            conditional_configs=configs,
+            one_time_triggered=triggered,
+            recurring_state=recurring,
+        )
+        assert result == 0.0
+
+    def test_one_time_does_not_trigger_above_threshold(self):
+        configs = [{"cashflow_type": "one_time", "trigger_threshold_multiplier": 0.5, "amount": 1000.0}]
+        triggered = {0: None}
+        recurring = {}
+
+        # Month 0: spending at 60% - above 50% threshold
+        result = utils.evaluate_conditional_cashflows(
+            spending_target=600.0,
+            initial_spending=1000.0,
+            month_idx=0,
+            conditional_configs=configs,
+            one_time_triggered=triggered,
+            recurring_state=recurring,
+        )
+        assert result == 0.0
+        assert triggered[0] is None  # Not triggered
+
+    def test_recurring_activates_and_deactivates(self):
+        configs = [{"cashflow_type": "recurring", "trigger_threshold_multiplier": 0.6, "amount": 500.0}]
+        triggered = {}
+        recurring = {0: {"active": False, "started_month": None}}
+
+        # Month 0: spending at 50% - below 60% threshold, activates
+        result = utils.evaluate_conditional_cashflows(
+            spending_target=500.0,
+            initial_spending=1000.0,
+            month_idx=0,
+            conditional_configs=configs,
+            one_time_triggered=triggered,
+            recurring_state=recurring,
+        )
+        assert result == 0.0  # No contribution in activation month
+        assert recurring[0]["active"] is True
+        assert recurring[0]["started_month"] == 0
+
+        # Month 1: still at 50%, cashflow applies
+        result = utils.evaluate_conditional_cashflows(
+            spending_target=500.0,
+            initial_spending=1000.0,
+            month_idx=1,
+            conditional_configs=configs,
+            one_time_triggered=triggered,
+            recurring_state=recurring,
+        )
+        assert result == 500.0
+        assert recurring[0]["active"] is True
+
+        # Month 2: recovered to 100%, deactivates
+        result = utils.evaluate_conditional_cashflows(
+            spending_target=1000.0,
+            initial_spending=1000.0,
+            month_idx=2,
+            conditional_configs=configs,
+            one_time_triggered=triggered,
+            recurring_state=recurring,
+        )
+        assert result == 0.0
+        assert recurring[0]["active"] is False
+
+    def test_recurring_can_reactivate(self):
+        configs = [{"cashflow_type": "recurring", "trigger_threshold_multiplier": 0.5, "amount": 300.0}]
+        triggered = {}
+        recurring = {0: {"active": False, "started_month": None}}
+
+        # Month 0: activate
+        utils.evaluate_conditional_cashflows(400.0, 1000.0, 0, configs, triggered, recurring)
+        assert recurring[0]["active"] is True
+
+        # Month 1: contribute
+        result = utils.evaluate_conditional_cashflows(400.0, 1000.0, 1, configs, triggered, recurring)
+        assert result == 300.0
+
+        # Month 2: recover to 100%
+        utils.evaluate_conditional_cashflows(1000.0, 1000.0, 2, configs, triggered, recurring)
+        assert recurring[0]["active"] is False
+
+        # Month 3: still at 100%
+        result = utils.evaluate_conditional_cashflows(1000.0, 1000.0, 3, configs, triggered, recurring)
+        assert result == 0.0
+
+        # Month 4: drop again, reactivate
+        utils.evaluate_conditional_cashflows(400.0, 1000.0, 4, configs, triggered, recurring)
+        assert recurring[0]["active"] is True
+        assert recurring[0]["started_month"] == 4
+
+        # Month 5: contribute again
+        result = utils.evaluate_conditional_cashflows(400.0, 1000.0, 5, configs, triggered, recurring)
+        assert result == 300.0
+
+    def test_multiple_conditional_cashflows(self):
+        configs = [
+            {"cashflow_type": "one_time", "trigger_threshold_multiplier": 0.5, "amount": 2000.0},
+            {"cashflow_type": "recurring", "trigger_threshold_multiplier": 0.7, "amount": 300.0},
+        ]
+        one_time_triggered = {0: 0}  # One-time already triggered in month 0
+        recurring_state = {1: {"active": True, "started_month": 0}}  # Recurring already active
+
+        # Month 1: one-time contributes (first month after trigger), recurring contributes
+        result = utils.evaluate_conditional_cashflows(
+            spending_target=400.0,
+            initial_spending=1000.0,
+            month_idx=1,
+            conditional_configs=configs,
+            one_time_triggered=one_time_triggered,
+            recurring_state=recurring_state,
+        )
+        assert result == 2300.0  # 2000 + 300
+
+    def test_threshold_exactly_matched_does_not_trigger(self):
+        configs = [{"cashflow_type": "recurring", "trigger_threshold_multiplier": 0.5, "amount": 100.0}]
+        recurring = {0: {"active": False, "started_month": None}}
+
+        # Spending exactly at threshold (50% == 50%)
+        result = utils.evaluate_conditional_cashflows(
+            spending_target=500.0,
+            initial_spending=1000.0,
+            month_idx=0,
+            conditional_configs=configs,
+            one_time_triggered={},
+            recurring_state=recurring,
+        )
+        assert recurring[0]["active"] is False  # Not triggered - must be strictly below
+
+    def test_recovery_exactly_at_100_percent_deactivates(self):
+        configs = [{"cashflow_type": "recurring", "trigger_threshold_multiplier": 0.5, "amount": 100.0}]
+        recurring = {0: {"active": True, "started_month": 0}}
+
+        # Recovery at exactly 100%
+        result = utils.evaluate_conditional_cashflows(
+            spending_target=1000.0,
+            initial_spending=1000.0,
+            month_idx=5,
+            conditional_configs=configs,
+            one_time_triggered={},
+            recurring_state=recurring,
+        )
+        assert recurring[0]["active"] is False  # 100% >= 100%, deactivated
+
+    def test_zero_initial_spending_returns_zero(self):
+        configs = [{"cashflow_type": "recurring", "trigger_threshold_multiplier": 0.5, "amount": 100.0}]
+        recurring = {0: {"active": False, "started_month": None}}
+
+        result = utils.evaluate_conditional_cashflows(
+            spending_target=0.0,
+            initial_spending=0.0,
+            month_idx=0,
+            conditional_configs=configs,
+            one_time_triggered={},
+            recurring_state=recurring,
+        )
+        assert result == 0.0  # Graceful handling

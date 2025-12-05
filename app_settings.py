@@ -67,6 +67,61 @@ class CashflowSetting:
 
 
 @dataclass
+class ConditionalCashflowSetting:
+    """A cashflow that triggers based on spending relative to initial spending."""
+
+    cashflow_type: str  # "one_time" or "recurring"
+    trigger_threshold: str  # "5%", "10%", ..., "95%"
+    amount: float
+    label: str = ""
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> Optional["ConditionalCashflowSetting"]:
+        if not isinstance(data, dict):
+            return None
+        try:
+            cashflow_type = str(data.get("cashflow_type", "one_time"))
+            if cashflow_type not in ("one_time", "recurring"):
+                return None
+            trigger_threshold = str(data.get("trigger_threshold", "50%"))
+            amount = float(data.get("amount", 0.0))
+        except (TypeError, ValueError):
+            return None
+        label_raw = data.get("label")
+        label = str(label_raw).strip() if label_raw is not None else ""
+        return cls(
+            cashflow_type=cashflow_type,
+            trigger_threshold=trigger_threshold,
+            amount=amount,
+            label=label,
+        )
+
+    def to_serializable(self) -> Dict[str, Any]:
+        return {
+            "cashflow_type": self.cashflow_type,
+            "trigger_threshold": self.trigger_threshold,
+            "amount": float(self.amount),
+            "label": self.label,
+        }
+
+    def to_calculation_dict(self) -> Dict[str, Any]:
+        return {
+            "cashflow_type": self.cashflow_type,
+            "trigger_threshold_multiplier": self.trigger_threshold_multiplier,
+            "amount": float(self.amount),
+        }
+
+    @property
+    def trigger_threshold_multiplier(self) -> float:
+        """Convert threshold string to float multiplier."""
+        result = _relative_option_to_multiplier(self.trigger_threshold)
+        return result if result is not None else 0.5
+
+    def signature(self) -> tuple:
+        return (self.cashflow_type, self.trigger_threshold, float(self.amount))
+
+
+@dataclass
 class Settings:
     mode: str
     start_date: dt.date
@@ -87,6 +142,7 @@ class Settings:
     spending_floor_option: str
     final_value_target: float = 0.0
     cashflows: List[CashflowSetting] = field(default_factory=list)
+    conditional_cashflows: List[ConditionalCashflowSetting] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # Type coercion
@@ -162,6 +218,17 @@ class Settings:
                     cleaned.append(parsed)
         self.cashflows = cleaned
 
+        # Clean conditional cashflows
+        cleaned_conditional: List[ConditionalCashflowSetting] = []
+        for flow in self.conditional_cashflows:
+            if isinstance(flow, ConditionalCashflowSetting):
+                cleaned_conditional.append(flow)
+            else:
+                parsed = ConditionalCashflowSetting.from_dict(flow)  # type: ignore[arg-type]
+                if parsed is not None:
+                    cleaned_conditional.append(parsed)
+        self.conditional_cashflows = cleaned_conditional
+
     @property
     def spending_cap_multiplier(self) -> Optional[float]:
         return _relative_option_to_multiplier(self.spending_cap_option)
@@ -172,6 +239,9 @@ class Settings:
 
     def cashflows_for_calculation(self) -> List[Dict[str, Any]]:
         return [flow.to_calculation_dict() for flow in self.cashflows]
+
+    def conditional_cashflows_for_calculation(self) -> List[Dict[str, Any]]:
+        return [flow.to_calculation_dict() for flow in self.conditional_cashflows]
 
     def simulation_signature(self) -> Dict[str, Any]:
         return {
@@ -191,6 +261,7 @@ class Settings:
             "spending_cap_multiplier": self.spending_cap_multiplier,
             "spending_floor_multiplier": self.spending_floor_multiplier,
             "cashflows": tuple(flow.signature() for flow in self.cashflows),
+            "conditional_cashflows": tuple(flow.signature() for flow in self.conditional_cashflows),
             "initial_monthly_spending": float(self.initial_monthly_spending),
             "initial_spending_overridden": bool(self.initial_spending_overridden),
             "final_value_target": float(self.final_value_target),
@@ -227,6 +298,7 @@ class Settings:
             "spending_floor_option": self.spending_floor_option,
             "final_value_target": float(self.final_value_target),
             "cashflows": [flow.to_serializable() for flow in self.cashflows],
+            "conditional_cashflows": [flow.to_serializable() for flow in self.conditional_cashflows],
         }
 
     def to_base64(self) -> str:
@@ -246,6 +318,9 @@ class Settings:
 
         cashflows_data = [CashflowSetting.from_dict(item) for item in data.get("cashflows", [])]
         cashflows_clean = [cf for cf in cashflows_data if cf is not None]
+
+        conditional_data = [ConditionalCashflowSetting.from_dict(item) for item in data.get("conditional_cashflows", [])]
+        conditional_clean = [cf for cf in conditional_data if cf is not None]
 
         return cls(
             mode=data.get("mode", "Simulation Mode"),
@@ -267,6 +342,7 @@ class Settings:
             spending_floor_option=data.get("spending_floor_option", "Unlimited"),
             final_value_target=data.get("final_value_target", 0.0),
             cashflows=cashflows_clean,
+            conditional_cashflows=conditional_clean,
         )
 
     @classmethod
@@ -320,6 +396,7 @@ class Settings:
         session_state["spending_floor_option"] = self.spending_floor_option
         session_state["final_value_target"] = self.final_value_target
         session_state["cashflows"] = [flow.to_serializable() for flow in self.cashflows]
+        session_state["conditional_cashflows"] = [flow.to_serializable() for flow in self.conditional_cashflows]
 
     def to_isr_params(self) -> Dict[str, Any]:
         """Return parameters for computing the initial spending rate."""

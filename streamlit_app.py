@@ -8,7 +8,7 @@ import streamlit as st
 import controls
 import display
 import utils
-from app_settings import CashflowSetting, Settings
+from app_settings import CashflowSetting, ConditionalCashflowSetting, Settings
 
 st.set_page_config(layout="wide", page_title="Guardrail Withdrawal Simulator")
 
@@ -134,8 +134,10 @@ cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 201, 5)]
 floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 24, -5)]
 
 controls.sync_cashflows_from_widgets()
+controls.sync_conditional_cashflows_from_widgets()
 
 sanitized_cashflows = controls.sanitize_cashflows(st.session_state.get("cashflows"))
+sanitized_conditional_cashflows = controls.sanitize_conditional_cashflows(st.session_state.get("conditional_cashflows"))
 
 # Compute Initial Spending Rate (ISR) to show in the Target Success Rate label.
 # We recompute only when relevant inputs change to avoid unnecessary calls.
@@ -380,7 +382,6 @@ with st.sidebar.expander("Advanced Controls"):
     )
     st.number_input(
         "Final Value Target (Bequest)",
-        value=controls.get_float_state("final_value_target", 0.0),
         min_value=0.0,
         max_value=float(initial_value),
         step=10000.0,
@@ -407,10 +408,25 @@ with st.sidebar.expander("Advanced Controls"):
 
     controls.draw_cashflow_widget_rows()
 
+    if st.button("Add Conditional Cashflow", key="add_conditional_cashflow_btn"):
+        st.session_state["conditional_cashflows"].append({
+            "cashflow_type": "one_time",
+            "trigger_threshold": "50%",
+            "amount": 0.0,
+            "label": f"Conditional {len(st.session_state['conditional_cashflows']) + 1}",
+        })
+        st.rerun()
+
+    controls.draw_conditional_cashflow_widget_rows()
+
 
 # Build Settings object representing the full control state
 cashflow_settings = [
     cf for cf in (CashflowSetting.from_dict(flow) for flow in sanitized_cashflows)
+    if cf is not None
+]
+conditional_cashflow_settings = [
+    cf for cf in (ConditionalCashflowSetting.from_dict(flow) for flow in sanitized_conditional_cashflows)
     if cf is not None
 ]
 
@@ -434,6 +450,7 @@ settings = Settings(
     spending_floor_option=st.session_state.get("spending_floor_option", "Unlimited"),
     final_value_target=float(st.session_state.get("final_value_target", 0.0)),
     cashflows=cashflow_settings,
+    conditional_cashflows=conditional_cashflow_settings,
 )
 
 st.session_state["settings"] = settings
