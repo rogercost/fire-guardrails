@@ -409,10 +409,6 @@ with st.sidebar.expander("Advanced Controls"):
 
     controls.draw_cashflow_widget_rows()
 
-    st.divider()
-    st.markdown("**Conditional Cashflows**")
-    st.caption("Trigger based on spending level relative to initial spending")
-
     if st.button("Add Conditional Cashflow", key="add_conditional_cashflow_btn"):
         st.session_state["conditional_cashflows"].append({
             "cashflow_type": "one_time",

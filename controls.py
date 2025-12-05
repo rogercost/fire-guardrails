@@ -415,7 +415,8 @@ def draw_conditional_cashflow_widget_rows():
             "Trigger Below",
             options=CONDITIONAL_THRESHOLD_OPTIONS,
             key=f"ccf_threshold_{idx}",
-            help="Cashflow triggers when spending falls below this % of initial spending",
+            help="Cashflow triggers when spending falls below this % of initial spending. Recurring cashflows "
+                 "will then end if and when spending increases back to 100% of initial spending.",
         )
         col_amount.number_input(
             "Amount ($/mo)",
