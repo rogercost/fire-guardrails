@@ -212,6 +212,8 @@ def initialize_display():
         st.session_state["spending_floor_option"] = "Unlimited"
     if "cashflows" not in st.session_state:
         st.session_state["cashflows"] = []
+    if "conditional_cashflows" not in st.session_state:
+        st.session_state["conditional_cashflows"] = []
     if "_initial_spending_overridden" not in st.session_state:
         st.session_state["_initial_spending_overridden"] = False
     if "_initial_spending_auto_value" not in st.session_state:
@@ -258,6 +260,170 @@ def draw_cashflow_widget_rows():
             format="%0.0f",
             key=f"cf_amount_{idx}",
         )
+
+
+# Helpers for conditional cashflow management
+CONDITIONAL_THRESHOLD_OPTIONS = tuple(f"{pct}%" for pct in range(5, 100, 5))
+CONDITIONAL_TYPE_OPTIONS = ("One-time", "Recurring")
+
+
+def sanitize_conditional_cashflows(raw_cashflows):
+    """Convert raw conditional cashflow inputs into validated dictionaries."""
+
+    sanitized = []
+    for flow in raw_cashflows or []:
+        try:
+            cashflow_type = str(flow.get("cashflow_type", "one_time"))
+            if cashflow_type not in ("one_time", "recurring"):
+                continue
+            trigger_threshold = str(flow.get("trigger_threshold", "50%"))
+            amount = float(flow.get("amount", 0.0))
+        except (AttributeError, TypeError, ValueError):
+            continue
+
+        label_raw = flow.get("label") if isinstance(flow, dict) else None
+        label = str(label_raw).strip() if label_raw is not None else None
+
+        sanitized.append({
+            "cashflow_type": cashflow_type,
+            "trigger_threshold": trigger_threshold,
+            "amount": amount,
+            "label": label,
+        })
+    return sanitized
+
+
+def clear_conditional_cashflow_widget_state(start_idx: int = 0) -> None:
+    """Remove cached widget values for conditional cashflow inputs from the specified index onward."""
+
+    prefixes = (
+        "ccf_type_",
+        "ccf_threshold_",
+        "ccf_amount_",
+        "ccf_label_",
+    )
+
+    keys_to_drop = []
+    for key in list(st.session_state.keys()):
+        for prefix in prefixes:
+            if key.startswith(prefix):
+                suffix = key[len(prefix):]
+                if suffix.isdigit() and int(suffix) >= start_idx:
+                    keys_to_drop.append(key)
+                break
+
+    for key in keys_to_drop:
+        del st.session_state[key]
+
+
+def ensure_conditional_cashflow_widget_state(idx: int, flow: dict) -> None:
+    """Keep a conditional cashflow row's widget state aligned with sanitized default values."""
+
+    type_key = f"ccf_type_{idx}"
+    threshold_key = f"ccf_threshold_{idx}"
+    amount_key = f"ccf_amount_{idx}"
+    label_key = f"ccf_label_{idx}"
+
+    default_type = str(flow.get("cashflow_type", "one_time"))
+    # Convert internal value to display value
+    default_type_display = "One-time" if default_type == "one_time" else "Recurring"
+    default_threshold = str(flow.get("trigger_threshold", "50%"))
+    default_amount = float(flow.get("amount", 0.0))
+    default_label = str(flow.get("label") or f"Conditional {idx + 1}")
+
+    if type_key not in st.session_state:
+        st.session_state[type_key] = default_type_display
+
+    if threshold_key not in st.session_state:
+        st.session_state[threshold_key] = default_threshold
+
+    if amount_key not in st.session_state:
+        st.session_state[amount_key] = default_amount
+
+    if label_key not in st.session_state or not str(st.session_state[label_key]).strip():
+        st.session_state[label_key] = default_label
+
+
+def sync_conditional_cashflows_from_widgets() -> None:
+    """Write the current widget state back into the tracked conditional cashflow configurations."""
+
+    flows = st.session_state.get("conditional_cashflows")
+    if not flows:
+        return
+
+    for idx, flow in enumerate(flows):
+        type_key = f"ccf_type_{idx}"
+        threshold_key = f"ccf_threshold_{idx}"
+        amount_key = f"ccf_amount_{idx}"
+        label_key = f"ccf_label_{idx}"
+
+        type_display = st.session_state.get(type_key, "One-time")
+        # Convert display value to internal value
+        type_val = "one_time" if type_display == "One-time" else "recurring"
+
+        threshold_val = st.session_state.get(threshold_key, flow.get("trigger_threshold", "50%"))
+
+        try:
+            amount_val = float(st.session_state.get(amount_key, flow.get("amount", 0.0)))
+        except (TypeError, ValueError):
+            amount_val = float(flow.get("amount", 0.0))
+
+        label_raw = st.session_state.get(label_key, flow.get("label") or f"Conditional {idx + 1}")
+        label_val = str(label_raw).strip() or f"Conditional {idx + 1}"
+
+        st.session_state[type_key] = type_display
+        st.session_state[threshold_key] = threshold_val
+        st.session_state[amount_key] = amount_val
+        st.session_state[label_key] = label_val
+
+        flows[idx] = {
+            "cashflow_type": type_val,
+            "trigger_threshold": threshold_val,
+            "amount": amount_val,
+            "label": label_val,
+        }
+
+
+def draw_conditional_cashflow_widget_rows():
+    """Render editable conditional cashflow rows and keep their widgets synchronized."""
+
+    for idx, flow in enumerate(st.session_state.get("conditional_cashflows", [])):
+        ensure_conditional_cashflow_widget_state(idx, flow)
+
+        # Row 1: Name and remove button
+        name_col, remove_col = st.columns([1, 0.15])
+        label_key = f"ccf_label_{idx}"
+        name_col.text_input(
+            "Conditional Cashflow Name",
+            key=label_key,
+            label_visibility="collapsed",
+            placeholder="Conditional cashflow name",
+        )
+        if remove_col.button("✕", key=f"ccf_remove_{idx}"):
+            st.session_state["conditional_cashflows"].pop(idx)
+            clear_conditional_cashflow_widget_state(idx)
+            st.rerun()
+
+        # Row 2: Type, Threshold, Amount
+        col_type, col_threshold, col_amount = st.columns(3)
+        col_type.selectbox(
+            "Type",
+            options=CONDITIONAL_TYPE_OPTIONS,
+            key=f"ccf_type_{idx}",
+        )
+        col_threshold.selectbox(
+            "Trigger Below",
+            options=CONDITIONAL_THRESHOLD_OPTIONS,
+            key=f"ccf_threshold_{idx}",
+            help="Cashflow triggers when spending falls below this % of initial spending",
+        )
+        col_amount.number_input(
+            "Amount ($/mo)",
+            step=50.0,
+            format="%0.0f",
+            key=f"ccf_amount_{idx}",
+        )
+
 
 def render_dirty_banner():
     """Display a warning banner indicating that the inputs changed and a rerun is needed."""
