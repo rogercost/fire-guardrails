@@ -382,7 +382,6 @@ with st.sidebar.expander("Advanced Controls"):
     )
     st.number_input(
         "Final Value Target (Bequest)",
-        value=controls.get_float_state("final_value_target", 0.0),
         min_value=0.0,
         max_value=float(initial_value),
         step=10000.0,
