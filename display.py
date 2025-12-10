@@ -18,38 +18,17 @@ def _fmt_currency(value, escape_for_markdown: bool = False) -> str:
     return f"{prefix}{value:,.0f}"
 
 
-def _resolve_analysis_horizon(shiller_df, params: dict, is_guidance: bool, context: str) -> Tuple[int, pd.Timestamp]:
-    """Compute num_months and analysis_end_date based on mode and params."""
-    if is_guidance:
-        latest_shiller_date = pd.to_datetime(shiller_df["Date"].max())
-        today = pd.to_datetime(datetime.date.today())
-        analysis_end_date = latest_shiller_date if latest_shiller_date <= today else today
-        num_months = params['duration_months']
-        if num_months <= 0:
-            num_months = 360
-    else:
-        num_months = params['duration_months']
-        if num_months <= 0:
-            raise ValueError(f"Invalid retirement duration to compute {context}.")
-        analysis_end_date = params['start_date']
-    return num_months, analysis_end_date
-
-
-def update_isr_dynamic_label(isr_params: dict, is_guidance: bool, cashflows: list):
+def update_isr_dynamic_label(isr_params: dict, cashflows: list):
     """
     Updates the dynamic label on the target success rate input that shows the corresponding initial spending rate.
     """
     shiller_df = utils.get_cached_shiller_df(st.session_state)
-    num_months, analysis_end_date_used = _resolve_analysis_horizon(
-        shiller_df, isr_params, is_guidance, "initial spending rate"
-    )
 
     res = utils.get_spending_rate_for_fixed_success_rate(
         df=shiller_df,
         desired_success_rate=isr_params['desired_success_rate'],
-        num_months=num_months,
+        num_months=isr_params['duration_months'],
         analysis_start_date=isr_params['analysis_start_date'],
-        analysis_end_date=analysis_end_date_used,  # Use 'today' in Guidance Mode to match label logic
         initial_value=isr_params['initial_value'],
         stock_pct=isr_params['stock_pct'],
         tolerance=0.001,
@@ -62,14 +41,11 @@ def update_isr_dynamic_label(isr_params: dict, is_guidance: bool, cashflows: lis
     st.session_state['isr_params'] = isr_params
 
 
-def update_guardrail_dynamic_labels(gr_params: dict, is_guidance: bool, cashflows: list):
+def update_guardrail_dynamic_labels(gr_params: dict, cashflows: list):
     """
     Updates the dynamic labels on the upper and lower guardrail inputs that show the corresponding portfolio values.
     """
     shiller_df = utils.get_cached_shiller_df(st.session_state)
-    num_months, analysis_end_date_used = _resolve_analysis_horizon(
-        shiller_df, gr_params, is_guidance, "guardrail labels"
-    )
 
     # First-period spending used to determine portfolio values that align with the guardrails
     first_month_spending = float(gr_params.get('initial_spending', 0.0))
@@ -79,9 +55,8 @@ def update_guardrail_dynamic_labels(gr_params: dict, is_guidance: bool, cashflow
     upper_res = utils.get_spending_rate_for_fixed_success_rate(
         df=shiller_df,
         desired_success_rate=gr_params['upper_sr'],
-        num_months=num_months,
+        num_months=gr_params['duration_months'],
         analysis_start_date=gr_params['analysis_start_date'],
-        analysis_end_date=analysis_end_date_used,
         initial_value=gr_params['initial_value'],
         stock_pct=gr_params['stock_pct'],
         tolerance=0.001,
@@ -94,9 +69,8 @@ def update_guardrail_dynamic_labels(gr_params: dict, is_guidance: bool, cashflow
     lower_res = utils.get_spending_rate_for_fixed_success_rate(
         df=shiller_df,
         desired_success_rate=gr_params['lower_sr'],
-        num_months=num_months,
+        num_months=gr_params['duration_months'],
         analysis_start_date=gr_params['analysis_start_date'],
-        analysis_end_date=analysis_end_date_used,
         initial_value=gr_params['initial_value'],
         stock_pct=gr_params['stock_pct'],
         tolerance=0.001,

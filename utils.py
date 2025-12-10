@@ -167,9 +167,13 @@ def test_all_periods(portfolio_returns, num_months, initial_value, monthly_spend
     return successes / num_periods
 
 
-def calculate_success_rate(df, withdrawal_rate, num_months, stock_pct=0.75,
-                           analysis_start_date='1871-01-01', analysis_end_date=None,
-                           initial_value=1_000_000, monthly_cashflows=None,
+def calculate_success_rate(df,
+                           withdrawal_rate,
+                           num_months,
+                           stock_pct=0.75,
+                           analysis_start_date='1871-01-01',
+                           initial_value=1_000_000,
+                           monthly_cashflows=None,
                            final_value_target=0.0):
     """
     Calculate the success rate for a given withdrawal rate.
@@ -180,10 +184,6 @@ def calculate_success_rate(df, withdrawal_rate, num_months, stock_pct=0.75,
     # Prepare data
     analysis_start = pd.to_datetime(analysis_start_date)
     df_filtered = df[df['Date'] >= analysis_start]
-
-    if analysis_end_date is not None:
-        analysis_end = pd.to_datetime(analysis_end_date)
-        df_filtered = df_filtered[df_filtered['Date'] <= analysis_end]
 
     # Calculate portfolio returns
     stock_prices = df_filtered['Real Total Return Price'].values
@@ -202,9 +202,10 @@ def calculate_success_rate(df, withdrawal_rate, num_months, stock_pct=0.75,
     return test_all_periods(portfolio_returns, num_months, initial_value, monthly_spending, monthly_cashflows, final_value_target)
 
 
-def get_spending_rate_for_fixed_success_rate(df, desired_success_rate, num_months,
+def get_spending_rate_for_fixed_success_rate(df,
+                                             desired_success_rate,
+                                             num_months,
                                              analysis_start_date='1871-01-01',
-                                             analysis_end_date=None,
                                              initial_value=1_000_000, stock_pct=0.75,
                                              tolerance=0.001, max_iterations=50,
                                              verbose=False,
@@ -269,12 +270,6 @@ def get_spending_rate_for_fixed_success_rate(df, desired_success_rate, num_month
     # Filter dataframe to only include dates from analysis_start_date onwards
     df_filtered = df[df['Date'] >= analysis_start].copy()
 
-    # Optional: propose an end date. If we're running a historical simulation of this method, we cannot allow
-    # access to future data.
-    if analysis_end_date is not None:
-        analysis_end = pd.to_datetime(analysis_end_date)
-        df_filtered = df_filtered[df_filtered['Date'] <= analysis_end]
-
     # Get all possible starting dates for simulation periods
     max_end_idx = len(df_filtered) - num_months
     if max_end_idx <= 0:
@@ -309,7 +304,6 @@ def get_spending_rate_for_fixed_success_rate(df, desired_success_rate, num_month
             num_months,
             stock_pct,
             analysis_start_date,
-            analysis_end_date,
             initial_value,
             monthly_cashflows=monthly_cashflows,
             final_value_target=final_value_target,
@@ -352,33 +346,6 @@ def get_spending_rate_for_fixed_success_rate(df, desired_success_rate, num_month
         'num_simulations': num_paths,
         'iterations': iteration + 1
     }
-
-def _compute_spending_rate_at_date(
-    df,
-    success_rate: float,
-    months_remaining: int,
-    analysis_start_date,
-    current_date,
-    current_portfolio_value: float,
-    stock_pct: float,
-    cashflows: list,
-    cashflow_schedule_slice,
-    final_value_target: float = 0.0,
-) -> float:
-    """Compute spending rate for a given success rate at a specific point in time."""
-    result = get_spending_rate_for_fixed_success_rate(
-        df=df,
-        desired_success_rate=success_rate,
-        num_months=months_remaining,
-        analysis_start_date=analysis_start_date,
-        analysis_end_date=None,
-        initial_value=current_portfolio_value,
-        stock_pct=stock_pct,
-        cashflows=cashflows,
-        cashflow_schedule=cashflow_schedule_slice,
-        final_value_target=final_value_target,
-    )
-    return result['spending_rate']
 
 
 def is_adjustment_month(ts: pd.Timestamp, adjustment_frequency: str) -> bool:
@@ -580,12 +547,17 @@ def get_guardrail_withdrawals(
         schedule_slice = monthly_cashflows[i:i + months_remaining]
 
         def get_sr(success_rate):
-            return _compute_spending_rate_at_date(
-                df, success_rate, months_remaining, settings.analysis_start_date,
-                current_date, current_portfolio_value, settings.stock_pct,
-                cashflows, schedule_slice,
-                final_value_target=settings.final_value_target,
-            )
+            return get_spending_rate_for_fixed_success_rate(
+                df=df,
+                desired_success_rate=success_rate,
+                num_months=months_remaining,
+                analysis_start_date=settings.analysis_start_date,
+                initial_value=current_portfolio_value,
+                stock_pct=settings.stock_pct,
+                cashflows=cashflows,
+                cashflow_schedule=schedule_slice,
+                final_value_target=settings.final_value_target
+            )['spending_rate']
 
         if not guardrail_depleted:
 
@@ -751,7 +723,7 @@ def compute_guardrail_guidance_snapshot(
     -----
     This mirrors the first-iteration logic in :func:`get_guardrail_withdrawals`:
       - Determine months_remaining based on [asof_date .. end_date]
-      - Compute spending rates at target, upper, lower success rates using analysis_end_date=asof_date
+      - Compute spending rates at target, upper, lower success rates
       - Guardrail portfolio values are the PVs at which CURRENT spending would equal those spending rates
       - Hypothetical adjustments on guardrail hit are computed by moving partway back toward the target
         using the upper/lower adjustment fractions. Threshold gating is intentionally ignored.
@@ -781,7 +753,6 @@ def compute_guardrail_guidance_snapshot(
             desired_success_rate=float(desired_success_rate),
             num_months=num_months,
             analysis_start_date=settings.analysis_start_date,
-            analysis_end_date=None,
             initial_value=float(settings.initial_value),
             stock_pct=float(settings.stock_pct),
             cashflows=cashflows,
