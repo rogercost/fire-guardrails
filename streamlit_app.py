@@ -156,7 +156,7 @@ isr_label_suffix = ""
 
 try:
     if 'isr_params' not in st.session_state or st.session_state['isr_params'] != isr_params:
-        display.update_isr_dynamic_label(isr_params=isr_params, is_guidance=is_guidance, cashflows=sanitized_cashflows)
+        display.update_isr_dynamic_label(isr_params=isr_params, cashflows=sanitized_cashflows)
     isr = st.session_state.get('isr_value')
     if isr is not None:
         isr_label_suffix = f" (Initial SR: {isr*100:.2f}%)"
@@ -252,7 +252,7 @@ try:
     }
 
     if ('guardrail_params' not in st.session_state) or (st.session_state['guardrail_params'] != gr_params):
-        display.update_guardrail_dynamic_labels(gr_params=gr_params, is_guidance=is_guidance, cashflows=sanitized_cashflows)
+        display.update_guardrail_dynamic_labels(gr_params=gr_params, cashflows=sanitized_cashflows)
 
     upper_label_suffix = st.session_state.get('upper_label_suffix', " (Initial PV: N/A)")
     lower_label_suffix = st.session_state.get('lower_label_suffix', " (Initial PV: N/A)")
