@@ -285,8 +285,8 @@ def get_spending_rate_for_fixed_success_rate(df,
             raise ValueError("cashflow_schedule length must match num_months")
 
     # Binary search for the spending rate
-    low_rate = 0  # 0.0% annual spending rate
-    high_rate = 0.20  # 20% annual spending rate
+    low_rate = 0.0   # 0% annual spending rate
+    high_rate = 1.0  # 100% annual spending rate
 
     iteration = 0
     best_rate = None
