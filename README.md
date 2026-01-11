@@ -7,6 +7,8 @@ The app can be found here: https://fire-guardrails.streamlit.app/
 The premise is that by by adjusting spending in response to market conditions as we move through retirement, we can not 
 only increase our chances of success, but spend more while doing it.
 
+<img width="1454" height="741" alt="image" src="https://github.com/user-attachments/assets/5dc926cb-2928-4bb2-8361-2235c396f623" />
+
 **All dollar amounts shown are in real dollars, net of inflation.**
 
 ## Disclaimer
@@ -43,12 +45,15 @@ Then start the app:
 uv run streamlit run streamlit_app.py
 ```
 
-## Reporting Bugs and Issues
-
-This is a work in progress. Feel free to report issues or bugs, or suggest new features, 
-[here](https://github.com/rogercost/fire-guardrails/issues).
-
-Contributions are also welcome, please feel free to open a pull request.
-
 It will redirect you to http://localhost:8501/ where you can interact with the UI.
 
+## Reporting Bugs and Issues
+
+This is a work in progress. Feel free to report issues or bugs, ask questions about the results, or suggest new features, 
+[here](https://github.com/rogercost/fire-guardrails/issues).
+
+When asking about or sharing a specific setup, find the "Shareable link to this run" link at the bottom of the page, right-click and copy it. This will help others reproduce your exact test case for debugging or exploration.
+
+<img width="322" height="81" alt="image" src="https://github.com/user-attachments/assets/c07437c4-fbe2-41e0-a61e-e9cc448b9db0" />
+
+Contributions are also welcome, please feel free to open a pull request.
