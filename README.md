@@ -7,7 +7,14 @@ The app can be found here: https://fire-guardrails.streamlit.app/
 The premise is that by by adjusting spending in response to market conditions as we move through retirement, we can not 
 only increase our chances of success, but spend more while doing it.
 
-<img width="1454" height="741" alt="image" src="https://github.com/user-attachments/assets/5dc926cb-2928-4bb2-8361-2235c396f623" />
+<a href="https://fire-guardrails.streamlit.app/~/+/?config=H4sIAMn6YmkC_22R0W7DIAxFf2XiOY1Ip65t_qFP056mCVngNGwEMgOtqmn_PpMo6iKVNzi-1_blRwzBoGjFqx2yg2SDfzqVl0rEBJSUgVRwczzKjTxsZMOEMFnCAT3jTJNIDcGnPor2-UVWAjy4W7RRrT0O-4YNZg_rbbLg1AVcZtjI6dSy9A36S406iVbW-10l2OOMScWsNcaoaHKT9fFuMjV3NxVH9Mb6M49x2E5mS8VCVLggkTUGvWg7cBErkccRSZ0zkCGwbmnEQxUHF66Pqay3u0UM5jPHNCXSEeiSyEr-kMu64ajuJPWEsQ_OFCR3K9YRfmf0-sY5nuZtyxctW2kYVRhnW_HmnR1sQvO_onMh0OOazvrlI9Sc9TRAJTTEnnVXXvb9g6-BrYqeq1fo9w8d2-uqRgIAAA">
+  <img
+    width="1422"
+    height="945"
+    alt="image"
+    src="https://github.com/user-attachments/assets/e14cf616-40b3-4186-855e-b3ba765908b2"
+  />
+</a>
 
 **All dollar amounts shown are in real dollars, net of inflation.**
 
