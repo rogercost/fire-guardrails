@@ -9,6 +9,14 @@ import requests
 
 from app_settings import Settings
 
+FREQUENCY_OPTIONS = ["Monthly", "Quarterly", "Biannually", "Annually"]
+
+FREQUENCY_TO_PERIOD = {"Monthly": 1, "Quarterly": 3, "Biannually": 6, "Annually": 12}
+
+
+def frequency_to_period(frequency: str) -> int:
+    return FREQUENCY_TO_PERIOD.get(frequency, 1)
+
 
 def parse_shiller_date(series):
     """
@@ -138,6 +146,59 @@ def compute_portfolio_returns(stock_prices, bond_prices, stock_pct):
     return float(stock_pct) * stock_returns + (1 - float(stock_pct)) * bond_returns
 
 
+def compute_separate_returns(stock_prices, bond_prices):
+    """Compute separate stock and bond return series from price series."""
+    stock_returns = np.ones(len(stock_prices))
+    stock_returns[1:] = stock_prices[1:] / stock_prices[:-1]
+    bond_returns = np.ones(len(bond_prices))
+    bond_returns[1:] = bond_prices[1:] / bond_prices[:-1]
+    return stock_returns, bond_returns
+
+
+@nb.jit(nopython=True)
+def test_all_periods_with_rebalancing(stock_returns, bond_returns, target_stock_frac,
+                                       rebalance_period, num_months, initial_value,
+                                       monthly_spending, monthly_cashflows, final_value_target):
+    """
+    Run all paths with portfolio drift between rebalance dates.
+
+    Between rebalancing months the stock/bond allocation drifts according to
+    realised returns. On rebalance months the allocation snaps back to the
+    target.  When rebalance_period == 1 this is mathematically equivalent to
+    the blended-return fast path.
+    """
+    num_periods = len(stock_returns) - num_months + 1
+    successes = 0
+
+    for start_idx in range(num_periods):
+        value = initial_value
+        stock_frac = target_stock_frac
+
+        for i in range(num_months):
+            sr = stock_returns[start_idx + i]
+            br = bond_returns[start_idx + i]
+            blended = stock_frac * sr + (1.0 - stock_frac) * br
+
+            withdrawal = monthly_spending - monthly_cashflows[i]
+            if withdrawal < 0.0:
+                withdrawal = 0.0
+            value = value * blended - withdrawal
+            if value <= 0:
+                break
+
+            # Drift the allocation
+            if blended > 0.0:
+                stock_frac = (stock_frac * sr) / blended
+            # Rebalance on schedule (1-indexed month)
+            if (i + 1) % rebalance_period == 0:
+                stock_frac = target_stock_frac
+
+        if value > 0 and value >= final_value_target:
+            successes += 1
+
+    return successes / num_periods
+
+
 @nb.jit(nopython=True)
 def test_all_periods(portfolio_returns, num_months, initial_value, monthly_spending, monthly_cashflows, final_value_target):
     """
@@ -174,7 +235,8 @@ def calculate_success_rate(df,
                            analysis_start_date='1871-01-01',
                            initial_value=1_000_000,
                            monthly_cashflows=None,
-                           final_value_target=0.0):
+                           final_value_target=0.0,
+                           rebalance_frequency="Monthly"):
     """
     Calculate the success rate for a given withdrawal rate.
     Numba-accelerated version. Should be 500x+ faster than brute force.
@@ -185,10 +247,8 @@ def calculate_success_rate(df,
     analysis_start = pd.to_datetime(analysis_start_date)
     df_filtered = df[df['Date'] >= analysis_start]
 
-    # Calculate portfolio returns
     stock_prices = df_filtered['Real Total Return Price'].values
     bond_prices = df_filtered['Real Total Bond Returns'].values
-    portfolio_returns = compute_portfolio_returns(stock_prices, bond_prices, stock_pct)
     monthly_spending = initial_value * withdrawal_rate / 12
 
     if monthly_cashflows is None:
@@ -198,8 +258,18 @@ def calculate_success_rate(df,
         if len(monthly_cashflows) != num_months:
             raise ValueError("monthly_cashflows length must match num_months")
 
-    # Call the compiled function
-    return test_all_periods(portfolio_returns, num_months, initial_value, monthly_spending, monthly_cashflows, final_value_target)
+    period = frequency_to_period(rebalance_frequency)
+    if period <= 1:
+        # Fast path: blended returns (equivalent to monthly rebalancing)
+        portfolio_returns = compute_portfolio_returns(stock_prices, bond_prices, stock_pct)
+        return test_all_periods(portfolio_returns, num_months, initial_value, monthly_spending, monthly_cashflows, final_value_target)
+    else:
+        # Drift path: track separate asset returns and rebalance periodically
+        stock_returns, bond_returns = compute_separate_returns(stock_prices, bond_prices)
+        return test_all_periods_with_rebalancing(
+            stock_returns, bond_returns, float(stock_pct), period,
+            num_months, initial_value, monthly_spending, monthly_cashflows, final_value_target
+        )
 
 
 def get_spending_rate_for_fixed_success_rate(df,
@@ -212,7 +282,8 @@ def get_spending_rate_for_fixed_success_rate(df,
                                              cashflows=None,
                                              cashflow_start_offset=0,
                                              cashflow_schedule=None,
-                                             final_value_target=0.0):
+                                             final_value_target=0.0,
+                                             rebalance_frequency="Monthly"):
     """
     Compute the annual spending rate such that a historical simulation over periods of the desired length
     yields the desired success rate.
@@ -307,6 +378,7 @@ def get_spending_rate_for_fixed_success_rate(df,
             initial_value,
             monthly_cashflows=monthly_cashflows,
             final_value_target=final_value_target,
+            rebalance_frequency=rebalance_frequency,
         )
 
         # Check if we're within tolerance
@@ -490,10 +562,15 @@ def get_guardrail_withdrawals(
     cashflows = settings.cashflows_for_calculation()
     monthly_cashflows = cashflow_schedule_for_window(cashflows, total_months, 0)
 
-    # Pre-compute portfolio returns for the entire historical period (for speed)
+    # Pre-compute separate asset returns for the entire historical period
     all_stock_prices = df['Real Total Return Price'].values
     all_bond_prices = df['Real Total Bond Returns'].values
-    portfolio_returns = compute_portfolio_returns(all_stock_prices, all_bond_prices, settings.stock_pct)
+    all_stock_returns, all_bond_returns = compute_separate_returns(all_stock_prices, all_bond_prices)
+
+    rebalance_period = frequency_to_period(settings.rebalance_frequency)
+    target_stock_frac = float(settings.stock_pct)
+    current_stock_frac = target_stock_frac
+    fixed_stock_frac = target_stock_frac
 
     # Initialize results storage
     results = []
@@ -556,7 +633,8 @@ def get_guardrail_withdrawals(
                 stock_pct=settings.stock_pct,
                 cashflows=cashflows,
                 cashflow_schedule=schedule_slice,
-                final_value_target=settings.final_value_target
+                final_value_target=settings.final_value_target,
+                rebalance_frequency=settings.rebalance_frequency,
             )['spending_rate']
 
         if not guardrail_depleted:
@@ -686,9 +764,31 @@ def get_guardrail_withdrawals(
         if i < len(subset) - 1:
             # Find the index in the full dataset
             full_idx = df[df['Date'] == current_date].index[0]
-            month_return = portfolio_returns[full_idx + 1] if full_idx + 1 < len(portfolio_returns) else 1.0
-            current_portfolio_value *= month_return
-            fixed_portfolio_value *= month_return
+            if full_idx + 1 < len(all_stock_returns):
+                sr = all_stock_returns[full_idx + 1]
+                br = all_bond_returns[full_idx + 1]
+            else:
+                sr = 1.0
+                br = 1.0
+
+            # Guardrail path: apply blended return using current allocation
+            gr_blended = current_stock_frac * sr + (1.0 - current_stock_frac) * br
+            current_portfolio_value *= gr_blended
+            # Drift allocation
+            if gr_blended > 0.0:
+                current_stock_frac = (current_stock_frac * sr) / gr_blended
+
+            # Fixed path: apply blended return using fixed allocation
+            fx_blended = fixed_stock_frac * sr + (1.0 - fixed_stock_frac) * br
+            fixed_portfolio_value *= fx_blended
+            if fx_blended > 0.0:
+                fixed_stock_frac = (fixed_stock_frac * sr) / fx_blended
+
+            # Rebalance on schedule
+            next_date = subset.iloc[i + 1]['Date'] if i + 1 < len(subset) else None
+            if next_date is not None and is_adjustment_month(next_date, settings.rebalance_frequency):
+                current_stock_frac = target_stock_frac
+                fixed_stock_frac = target_stock_frac
 
         # Floor at zero and mark depletion so future months remain at zero
         if current_portfolio_value <= 0:
@@ -758,6 +858,7 @@ def compute_guardrail_guidance_snapshot(
             cashflows=cashflows,
             cashflow_schedule=monthly_cashflows,
             final_value_target=float(settings.final_value_target),
+            rebalance_frequency=settings.rebalance_frequency,
         )
         return float(res["spending_rate"]) if res["spending_rate"] is not None else None
 

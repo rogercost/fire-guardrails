@@ -218,6 +218,8 @@ def initialize_display():
         st.session_state["_initial_spending_overridden"] = False
     if "_initial_spending_auto_value" not in st.session_state:
         st.session_state["_initial_spending_auto_value"] = None
+    if "rebalance_frequency" not in st.session_state:
+        st.session_state["rebalance_frequency"] = "Monthly"
     if "final_value_target" not in st.session_state:
         st.session_state["final_value_target"] = 0.0
 
