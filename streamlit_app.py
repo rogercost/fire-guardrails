@@ -416,6 +416,31 @@ with st.sidebar.expander("Advanced Controls"):
              "value approaches zero.",
     )
 
+    st.number_input(
+        "Glidepath Duration (months)",
+        min_value=0, max_value=120, step=12,
+        key="glidepath_months",
+        help="Number of months over which to transition from the glidepath initial "
+             "allocation to the target Stock Percentage. Set to 0 to disable.\n\n"
+             "Note: success rate calculations (initial spending rate, guardrail levels, "
+             "and guidance) always use the target Stock Percentage, not the glidepath "
+             "position. The glidepath only affects month-to-month portfolio returns "
+             "during the simulation.",
+    )
+    st.slider(
+        "Glidepath Initial Stock %",
+        min_value=0.0, max_value=1.0, step=0.01,
+        key="glidepath_initial_pct",
+        disabled=(st.session_state.get("glidepath_months", 0) == 0),
+        help="Starting stock allocation at the beginning of retirement. "
+             "The allocation linearly shifts to the target Stock Percentage "
+             "over the Glidepath Duration.\n\n"
+             "Note: success rate calculations (initial spending rate, guardrail levels, "
+             "and guidance) always use the target Stock Percentage, not the glidepath "
+             "position. The glidepath only affects month-to-month portfolio returns "
+             "during the simulation.",
+    )
+
     if st.button("Add Recurring Cashflow", key="add_cashflow_btn"):
         st.session_state["cashflows"].append({
             "start_month": 0,
@@ -469,6 +494,8 @@ settings = Settings(
     spending_cap_option=st.session_state.get("spending_cap_option", "Unlimited"),
     spending_floor_option=st.session_state.get("spending_floor_option", "Unlimited"),
     final_value_target=float(st.session_state.get("final_value_target", 0.0)),
+    glidepath_initial_pct=float(st.session_state.get("glidepath_initial_pct", 0.75)),
+    glidepath_months=int(st.session_state.get("glidepath_months", 0)),
     cashflows=cashflow_settings,
     conditional_cashflows=conditional_cashflow_settings,
 )

@@ -222,6 +222,10 @@ def initialize_display():
         st.session_state["rebalance_frequency"] = "Monthly"
     if "final_value_target" not in st.session_state:
         st.session_state["final_value_target"] = 0.0
+    if "glidepath_initial_pct" not in st.session_state:
+        st.session_state["glidepath_initial_pct"] = 0.75
+    if "glidepath_months" not in st.session_state:
+        st.session_state["glidepath_months"] = 0
 
 
 def draw_cashflow_widget_rows():

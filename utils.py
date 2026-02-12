@@ -568,9 +568,17 @@ def get_guardrail_withdrawals(
     all_stock_returns, all_bond_returns = compute_separate_returns(all_stock_prices, all_bond_prices)
 
     rebalance_period = frequency_to_period(settings.rebalance_frequency)
-    target_stock_frac = float(settings.stock_pct)
-    current_stock_frac = target_stock_frac
-    fixed_stock_frac = target_stock_frac
+    final_stock_frac = float(settings.stock_pct)
+    gp_months = settings.glidepath_months
+    gp_initial = float(settings.glidepath_initial_pct)
+
+    def glidepath_target(month_idx):
+        if gp_months <= 0 or month_idx >= gp_months:
+            return final_stock_frac
+        return gp_initial + (final_stock_frac - gp_initial) * (month_idx / gp_months)
+
+    current_stock_frac = glidepath_target(0)
+    fixed_stock_frac = glidepath_target(0)
 
     # Initialize results storage
     results = []
@@ -787,8 +795,8 @@ def get_guardrail_withdrawals(
             # Rebalance on schedule
             next_date = subset.iloc[i + 1]['Date'] if i + 1 < len(subset) else None
             if next_date is not None and is_adjustment_month(next_date, settings.rebalance_frequency):
-                current_stock_frac = target_stock_frac
-                fixed_stock_frac = target_stock_frac
+                current_stock_frac = glidepath_target(i + 1)
+                fixed_stock_frac = glidepath_target(i + 1)
 
         # Floor at zero and mark depletion so future months remain at zero
         if current_portfolio_value <= 0:
