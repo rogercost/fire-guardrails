@@ -434,7 +434,7 @@ with st.sidebar.expander("Advanced Controls"):
         disabled=(st.session_state.get("glidepath_months", 0) == 0),
         help="Starting stock allocation at the beginning of retirement. "
              "The allocation linearly shifts to the target Stock Percentage "
-             "over the Glidepath Duration.\n\n"
+             "over the Glidepath Duration, updating at each rebalance date.\n\n"
              "Note: success rate calculations (initial spending rate, guardrail levels, "
              "and guidance) always use the target Stock Percentage, not the glidepath "
              "position. The glidepath only affects month-to-month portfolio returns "
