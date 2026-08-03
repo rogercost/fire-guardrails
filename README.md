@@ -35,7 +35,7 @@ Therefore it is important to keep in mind that running a historical period in th
 * The success rate simulation includes all periods up until the present. This means the "past investor" has a crystal ball into the future to see the statistical characteristics of how the market will behave.
 * The computation does not correct for investing inefficiencies like fees, trading costs or rebalancing drift. This means the "past investor" has access to low-fee passive index funds, which did not exist before the 1970's.
 
-The historical visualizations provided by the tool are thus better imagined as what would happen today if the market - in a totally unknowable future - happens to follow the exact same trajectory as it did in the past, rather than what an actual investor could have achieved during those historical periods.
+The historical visualizations provided by the tool are thus better imagined as what would happen today if the market - in a totally unknowable future - happens to follow the exact same statistical patterns as it did in the past, rather than what an actual investor could have achieved during those historical periods. Whether or not that type of understanding is applicable to your or my financial situation is anyone's guess and it is why I add extra emphasis on the disclaimer above!
 
 ## Data Sources
 
