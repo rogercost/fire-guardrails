@@ -102,8 +102,9 @@ analysis_start_date = st.sidebar.date_input(
     on_change=_unmark_initial_spending_overridden,
     help="Earliest date for historical data included to estimate success rates (Shiller data begins in 1871).\n\nCurrently, only the year and month "
          "are used, due to the monthly nature of the Shiller dataset. The day of the month is ignored.\n\nNote that when running historical "
-         "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and that month "
-         "in history. A financial advisor running this strategy in the past would not have had a crystal ball to look into the future!\n\n"
+         "simulations, each month's guardrails will be recalculated based on the historical data available between this start date and the most "
+         "recent available Shiller data date. A financial advisor running this strategy in the past would not have been able to do this - see Assumptions "
+         "in the [README](https://github.com/rogercost/fire-guardrails/tree/main#assumptions).\n\n"
          "(Hint: You can type the date in YYYY/MM/DD format instead of choosing it from the selector, which may be faster.)",
     key="analysis_start_date",
 )
