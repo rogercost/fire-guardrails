@@ -9,6 +9,7 @@ import controls
 import display
 import utils
 from app_settings import CashflowSetting, ConditionalCashflowSetting, Settings
+from utils import FREQUENCY_OPTIONS
 
 st.set_page_config(layout="wide", page_title="Guardrail Withdrawal Simulator")
 
@@ -131,6 +132,23 @@ stock_pct = st.sidebar.slider(
     help="Fraction of the portfolio allocated to US stocks; remainder to 10Y treasuries."
 )
 
+current_rebalance = st.session_state.get("rebalance_frequency", "Monthly")
+try:
+    rebalance_index = FREQUENCY_OPTIONS.index(str(current_rebalance))
+except ValueError:
+    rebalance_index = 0
+rebalance_frequency = st.sidebar.selectbox(
+    "Rebalance Frequency",
+    options=FREQUENCY_OPTIONS,
+    index=rebalance_index,
+    key="rebalance_frequency",
+    help="How often the portfolio is rebalanced to its target stock/bond allocation. "
+         "Monthly rebalancing (default) applies a blended return each month. Less frequent "
+         "rebalancing allows the allocation to drift between rebalance dates, which can affect "
+         "results during strong bull or bear markets.",
+    on_change=_unmark_initial_spending_overridden,
+)
+
 cap_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 201, 5)]
 floor_options = ["Unlimited"] + [f"{pct}%" for pct in range(100, 24, -5)]
 
@@ -151,6 +169,7 @@ isr_params = {
     # Use current target_success_rate if available, otherwise default of 0.90
     'desired_success_rate': float(st.session_state.get('target_success_rate', 0.90)),
     'final_value_target': float(st.session_state.get('final_value_target', 0.0)),
+    'rebalance_frequency': str(st.session_state.get('rebalance_frequency', 'Monthly')),
     'cashflows': controls.cashflows_to_tuple(sanitized_cashflows),
 }
 isr_label_suffix = ""
@@ -249,6 +268,7 @@ try:
         'isr': float(st.session_state.get('isr_value')) if st.session_state.get('isr_value') is not None else None,
         'initial_spending': float(st.session_state.get("initial_monthly_spending", 0.0)),
         'final_value_target': float(st.session_state.get('final_value_target', 0.0)),
+        'rebalance_frequency': str(st.session_state.get('rebalance_frequency', 'Monthly')),
         'cashflows': controls.cashflows_to_tuple(sanitized_cashflows),
     }
 
@@ -350,15 +370,14 @@ adjustment_threshold = st.sidebar.slider(
     disabled=is_guidance  # In Guidance Mode, single-run snapshot ignores threshold
 )
 
-frequency_options = ["Monthly", "Quarterly", "Biannually", "Annually"]
 current_frequency = st.session_state.get("adjustment_frequency", "Monthly")
 try:
-    frequency_index = frequency_options.index(str(current_frequency))
+    frequency_index = FREQUENCY_OPTIONS.index(str(current_frequency))
 except ValueError:
     frequency_index = 0
 adjustment_frequency = st.sidebar.selectbox(
     "Adjustment Frequency",
-    options=frequency_options,
+    options=FREQUENCY_OPTIONS,
     index=frequency_index,
     key="adjustment_frequency",
     help="How often spending adjustments are permitted. Choosing Quarterly, Biannually, or Annually restricts guardrail checks "
@@ -396,6 +415,31 @@ with st.sidebar.expander("Advanced Controls"):
              "if the portfolio value during retirement crosses below this value, as the required spending "
              "% rate (the denominator of the calculation) for the portfolio to end higher than its current "
              "value approaches zero.",
+    )
+
+    st.number_input(
+        "Glidepath Duration (months)",
+        min_value=0, max_value=120, step=12,
+        key="glidepath_months",
+        help="Number of months over which to transition from the glidepath initial "
+             "allocation to the target Stock Percentage. Set to 0 to disable.\n\n"
+             "Note: success rate calculations (initial spending rate, guardrail levels, "
+             "and guidance) always use the target Stock Percentage, not the glidepath "
+             "position. The glidepath only affects month-to-month portfolio returns "
+             "during the simulation.",
+    )
+    st.slider(
+        "Glidepath Initial Stock %",
+        min_value=0.0, max_value=1.0, step=0.01,
+        key="glidepath_initial_pct",
+        disabled=(st.session_state.get("glidepath_months", 0) == 0),
+        help="Starting stock allocation at the beginning of retirement. "
+             "The allocation linearly shifts to the target Stock Percentage "
+             "over the Glidepath Duration, updating at each rebalance date.\n\n"
+             "Note: success rate calculations (initial spending rate, guardrail levels, "
+             "and guidance) always use the target Stock Percentage, not the glidepath "
+             "position. The glidepath only affects month-to-month portfolio returns "
+             "during the simulation.",
     )
 
     if st.button("Add Recurring Cashflow", key="add_cashflow_btn"):
@@ -447,9 +491,12 @@ settings = Settings(
     lower_adjustment_fraction=float(lower_adjustment_fraction),
     adjustment_threshold=float(adjustment_threshold),
     adjustment_frequency=adjustment_frequency,
+    rebalance_frequency=rebalance_frequency,
     spending_cap_option=st.session_state.get("spending_cap_option", "Unlimited"),
     spending_floor_option=st.session_state.get("spending_floor_option", "Unlimited"),
     final_value_target=float(st.session_state.get("final_value_target", 0.0)),
+    glidepath_initial_pct=float(st.session_state.get("glidepath_initial_pct", 0.75)),
+    glidepath_months=int(st.session_state.get("glidepath_months", 0)),
     cashflows=cashflow_settings,
     conditional_cashflows=conditional_cashflow_settings,
 )

@@ -138,9 +138,12 @@ class Settings:
     lower_adjustment_fraction: float
     adjustment_threshold: float
     adjustment_frequency: str
+    rebalance_frequency: str
     spending_cap_option: str
     spending_floor_option: str
     final_value_target: float = 0.0
+    glidepath_initial_pct: float = 0.75
+    glidepath_months: int = 0
     cashflows: List[CashflowSetting] = field(default_factory=list)
     conditional_cashflows: List[ConditionalCashflowSetting] = field(default_factory=list)
 
@@ -159,9 +162,12 @@ class Settings:
         self.lower_adjustment_fraction = float(self.lower_adjustment_fraction)
         self.adjustment_threshold = float(self.adjustment_threshold)
         self.adjustment_frequency = str(self.adjustment_frequency)
+        self.rebalance_frequency = str(self.rebalance_frequency)
         self.spending_cap_option = str(self.spending_cap_option)
         self.spending_floor_option = str(self.spending_floor_option)
         self.final_value_target = float(self.final_value_target)
+        self.glidepath_initial_pct = float(self.glidepath_initial_pct)
+        self.glidepath_months = int(self.glidepath_months)
 
         # Validation
         if self.initial_value <= 0:
@@ -205,6 +211,15 @@ class Settings:
             raise ValueError(
                 f"Final value target ({self.final_value_target:,.0f}) cannot exceed "
                 f"initial portfolio value ({self.initial_value:,.0f})"
+            )
+        if not (0.0 <= self.glidepath_initial_pct <= 1.0):
+            raise ValueError(
+                f"Glidepath initial stock percentage must be between 0% and 100%, "
+                f"got {self.glidepath_initial_pct * 100:.0f}%"
+            )
+        if self.glidepath_months < 0:
+            raise ValueError(
+                f"Glidepath duration must be non-negative, got {self.glidepath_months} months"
             )
 
         # Clean cashflows
@@ -258,6 +273,7 @@ class Settings:
             "lower_adjustment_fraction": float(self.lower_adjustment_fraction),
             "adjustment_threshold": float(self.adjustment_threshold),
             "adjustment_frequency": self.adjustment_frequency,
+            "rebalance_frequency": self.rebalance_frequency,
             "spending_cap_multiplier": self.spending_cap_multiplier,
             "spending_floor_multiplier": self.spending_floor_multiplier,
             "cashflows": tuple(flow.signature() for flow in self.cashflows),
@@ -265,6 +281,8 @@ class Settings:
             "initial_monthly_spending": float(self.initial_monthly_spending),
             "initial_spending_overridden": bool(self.initial_spending_overridden),
             "final_value_target": float(self.final_value_target),
+            "glidepath_initial_pct": float(self.glidepath_initial_pct),
+            "glidepath_months": int(self.glidepath_months),
         }
 
     def retirement_end_date(self) -> Optional[dt.date]:
@@ -294,9 +312,12 @@ class Settings:
             "lower_adjustment_fraction": float(self.lower_adjustment_fraction),
             "adjustment_threshold": float(self.adjustment_threshold),
             "adjustment_frequency": self.adjustment_frequency,
+            "rebalance_frequency": self.rebalance_frequency,
             "spending_cap_option": self.spending_cap_option,
             "spending_floor_option": self.spending_floor_option,
             "final_value_target": float(self.final_value_target),
+            "glidepath_initial_pct": float(self.glidepath_initial_pct),
+            "glidepath_months": int(self.glidepath_months),
             "cashflows": [flow.to_serializable() for flow in self.cashflows],
             "conditional_cashflows": [flow.to_serializable() for flow in self.conditional_cashflows],
         }
@@ -338,9 +359,12 @@ class Settings:
             lower_adjustment_fraction=data.get("lower_adjustment_fraction", 0.1),
             adjustment_threshold=data.get("adjustment_threshold", 0.05),
             adjustment_frequency=data.get("adjustment_frequency", "Monthly"),
+            rebalance_frequency=data.get("rebalance_frequency", "Monthly"),
             spending_cap_option=data.get("spending_cap_option", "Unlimited"),
             spending_floor_option=data.get("spending_floor_option", "Unlimited"),
             final_value_target=data.get("final_value_target", 0.0),
+            glidepath_initial_pct=data.get("glidepath_initial_pct", data.get("stock_pct", 0.75)),
+            glidepath_months=data.get("glidepath_months", 0),
             cashflows=cashflows_clean,
             conditional_cashflows=conditional_clean,
         )
@@ -392,9 +416,12 @@ class Settings:
         session_state["lower_adjustment_fraction"] = self.lower_adjustment_fraction
         session_state["adjustment_threshold"] = self.adjustment_threshold
         session_state["adjustment_frequency"] = self.adjustment_frequency
+        session_state["rebalance_frequency"] = self.rebalance_frequency
         session_state["spending_cap_option"] = self.spending_cap_option
         session_state["spending_floor_option"] = self.spending_floor_option
         session_state["final_value_target"] = self.final_value_target
+        session_state["glidepath_initial_pct"] = self.glidepath_initial_pct
+        session_state["glidepath_months"] = self.glidepath_months
         session_state["cashflows"] = [flow.to_serializable() for flow in self.cashflows]
         session_state["conditional_cashflows"] = [flow.to_serializable() for flow in self.conditional_cashflows]
 
@@ -408,6 +435,7 @@ class Settings:
             "stock_pct": float(self.stock_pct),
             "desired_success_rate": float(self.target_success_rate),
             "final_value_target": float(self.final_value_target),
+            "rebalance_frequency": self.rebalance_frequency,
         }
 
     def to_guardrail_params(self) -> Dict[str, Any]:
@@ -421,4 +449,5 @@ class Settings:
             "lower_sr": float(self.lower_guardrail_success),
             "initial_spending": float(self.initial_monthly_spending),
             "final_value_target": float(self.final_value_target),
+            "rebalance_frequency": self.rebalance_frequency,
         }

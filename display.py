@@ -36,6 +36,7 @@ def update_isr_dynamic_label(isr_params: dict, cashflows: list):
         verbose=False,
         cashflows=cashflows,
         final_value_target=isr_params.get('final_value_target', 0.0),
+        rebalance_frequency=isr_params.get('rebalance_frequency', 'Monthly'),
     )
     st.session_state['isr_value'] = float(res['spending_rate']) if res['spending_rate'] is not None else None
     st.session_state['isr_params'] = isr_params
@@ -52,6 +53,8 @@ def update_guardrail_dynamic_labels(gr_params: dict, cashflows: list):
     final_value_target = gr_params.get('final_value_target', 0.0)
 
     # Compute spending rates at start of retirement using retirement start date as analysis end date
+    rebalance_frequency = gr_params.get('rebalance_frequency', 'Monthly')
+
     upper_res = utils.get_spending_rate_for_fixed_success_rate(
         df=shiller_df,
         desired_success_rate=gr_params['upper_sr'],
@@ -64,6 +67,7 @@ def update_guardrail_dynamic_labels(gr_params: dict, cashflows: list):
         verbose=False,
         cashflows=cashflows,
         final_value_target=final_value_target,
+        rebalance_frequency=rebalance_frequency,
     )
 
     lower_res = utils.get_spending_rate_for_fixed_success_rate(
@@ -78,6 +82,7 @@ def update_guardrail_dynamic_labels(gr_params: dict, cashflows: list):
         verbose=False,
         cashflows=cashflows,
         final_value_target=final_value_target,
+        rebalance_frequency=rebalance_frequency,
     )
 
     upper_sr = float(upper_res['spending_rate']) if upper_res['spending_rate'] is not None else None
